@@ -298,11 +298,89 @@ function reply(res,status,body,contentType='application/json; charset=utf-8'){
   res.end(typeof body==='string'||Buffer.isBuffer(body)?body:JSON.stringify(body));
 }
 
-// The public Pro Mobile application is read-only; no user login or trading endpoints.
+// Read-only application access gate. Secrets are server-local, never in Git.
+const crypto=require('node:crypto');
+const ACCESS_FILE=path.join(dataPath,'.pro-access-code');
+const SESSION_TTL=12*60*60*1000;
+const sessions=new Map();
+let failures=[],pendingLogins=0;
+const digest=value=>crypto.createHash('sha256').update(value).digest();
+function readAccessCode(){
+  try{
+    const value=fs.readFileSync(ACCESS_FILE,'utf8').trim();
+    return value.length>=8&&Buffer.byteLength(value)<=128?value:null;
+  }catch{return null;}
+}
+function loginPage(res,message='',status=200){
+  const html='<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pro 登录</title><style> *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f5f7;color:#15171b;font:16px system-ui,sans-serif;padding:24px}main{width:100%;max-width:380px;padding:30px;background:#fff;border:1px solid #e1e4e8;border-radius:18px;box-shadow:0 12px 40px #0000000b}h1{margin:0 0 8px;font-size:27px}p{color:#60646c;line-height:1.5}label{display:block;font-weight:600;margin:20px 0 8px}input,button{width:100%;min-height:48px;font:inherit;border-radius:9px;padding:12px}input{border:1px solid #c8cdd4}button{margin-top:16px;background:#17191d;color:#fff;border:0;font-weight:600}.msg{color:#a03925;font-size:14px}</style></head><body><main><h1>Pro V9</h1><p>南柯一梦制作 · 私人观察台</p><form method="post" action="/login"><label for="code">登录码</label><input id="code" name="code" type="password" autocomplete="current-password" required maxlength="128"><button type="submit">登录网站</button></form><p class="msg" role="status">'+message+'</p></main></body></html>';
+  res.writeHead(status,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"});
+  res.end(html);
+}
+function cookieOptions(req){
+  const secure=req.socket.encrypted||req.headers['x-forwarded-proto']==='https';
+  return '; Path=/; HttpOnly; SameSite=Strict'+(secure?'; Secure':'');
+}
+function sessionToken(req){
+  return /(?:^|;\s*)pro_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie||'')?.[1];
+}
+function accessGate(req,res,url){
+  const now=Date.now(),code=readAccessCode();
+  const fingerprint=code?digest(code).toString('hex'):null;
+  for(const [token,s] of sessions){if(s.until<=now||s.fingerprint!==fingerprint)sessions.delete(token);}
+  const token=sessionToken(req);
+  const authorized=!!(code&&token&&sessions.has(token));
+  if(req.method==='GET'&&url.pathname==='/api/pro2/health'&&!authorized){
+    // Only a minimal liveness response for the existing deployment health check.
+    reply(res,200,{ok:true});return false;
+  }
+  if(req.method==='POST'&&url.pathname==='/logout'){
+    if(token)sessions.delete(token);
+    res.writeHead(303,{'Location':'/','Cache-Control':'no-store','Set-Cookie':'pro_session='+cookieOptions(req)+'; Max-Age=0'});
+    res.end();return false;
+  }
+  if(req.method==='POST'&&url.pathname==='/login'){
+    if(!code){loginPage(res,'管理员尚未设置登录码。',503);req.resume();return false;}
+    failures=failures.filter(t=>t>now-5*60*1000);
+    if(failures.length>=12||pendingLogins>=8){loginPage(res,'尝试次数过多，请稍后再试。',429);req.resume();return false;}
+    if(!/^application\/x-www-form-urlencoded(?:;|$)/i.test(req.headers['content-type']||'')){loginPage(res,'请求格式错误。',400);req.resume();return false;}
+    pendingLogins++;
+    let chunks=[],size=0,finished=false;
+    const finish=()=>{if(finished)return false;finished=true;pendingLogins--;return true;};
+    req.setTimeout(10000,()=>{finish();req.destroy();});
+    req.on('aborted',finish);req.on('error',finish);req.on('close',finish);
+    req.on('data',chunk=>{
+      size+=chunk.length;
+      if(size>1024){finish();req.destroy();return;}
+      if(!finished)chunks.push(chunk);
+    });
+    req.on('end',()=>{
+      if(!finish())return;
+      const submitted=new URLSearchParams(Buffer.concat(chunks).toString('utf8')).get('code')||'';
+      const current=readAccessCode();
+      if(!current||!crypto.timingSafeEqual(digest(current),digest(submitted))){
+        failures.push(Date.now());loginPage(res,'登录码错误。',401);return;
+      }
+      failures=[];
+      if(sessions.size>=256)sessions.delete(sessions.keys().next().value);
+      if(token)sessions.delete(token);
+      const newToken=crypto.randomBytes(32).toString('hex');
+      sessions.set(newToken,{until:Date.now()+SESSION_TTL,fingerprint:digest(current).toString('hex')});
+      res.writeHead(303,{'Location':'/','Cache-Control':'no-store','Set-Cookie':'pro_session='+newToken+cookieOptions(req)+'; Max-Age=43200'});
+      res.end();
+    });
+    return false;
+  }
+  if(authorized)return true;
+  if(req.method==='GET'&&(url.pathname==='/'||url.pathname==='/index.html'||url.pathname==='/login')){
+    loginPage(res,code?'':'管理员尚未设置登录码。');return false;
+  }
+  reply(res,401,{error:'请先登录'});return false;
+}
 
 const server=http.createServer((req,res)=>{
-  if(req.method!=='GET')return reply(res,405,{error:'只允许GET；无交易/下单API'});
   let url;try{url=new URL(req.url,'http://localhost')}catch{return reply(res,400,{error:'无效请求'})}
+  if(!accessGate(req,res,url))return;
+  if(req.method!=='GET')return reply(res,405,{error:'只允许GET；无交易/下单API'});
   if(url.pathname==='/api/ui-error'){log('PRO_FRONTEND_ERROR '+(url.searchParams.get('message')||'unknown').slice(0,200));return reply(res,200,{ok:true})}
   if(url.pathname==='/api/pro2/snapshot')return reply(res,200,pro2.snapshot(pro2Trades));
   if(url.pathname==='/api/pro2/flow-health')return reply(res,200,pro2Trades.health());
