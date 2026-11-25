@@ -895,8 +895,10 @@ async function simPublicInfo(symbol){
   });
 }
 
+const PRACTICE_PAUSED=true;
 function simRoute(req,res,url){
   if(!url.pathname.startsWith('/api/practice/'))return false;
+  if(PRACTICE_PAUSED){req.resume();reply(res,503,{error:'暂停服务，请返回其他界面',paused:true});return true}
   const user=currentUser(req),p=url.pathname.slice('/api/practice/'.length),fail=(status,error)=>reply(res,status,{error});
   if(!user){fail(401,'请先登录');return true}
   try{

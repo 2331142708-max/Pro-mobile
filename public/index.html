@@ -145,6 +145,7 @@
 <style id="practice-reference-layout">
 .practice-periods{display:flex;overflow-x:auto;gap:0;white-space:nowrap;margin-top:9px;border-top:1px solid #f0f1f4;border-bottom:1px solid #f0f1f4;scrollbar-width:none}.practice-periods button{flex:1 0 auto;min-width:30px;padding:10px 5px;background:#fff;color:#848b96;font-weight:400;font-size:11px;border-radius:0}.practice-periods button[aria-pressed=true]{font-weight:700;color:#202630;border-bottom:2px solid #eab92c}.practice-chart{margin:0;border:0;min-height:150px;padding:0}.practice-chart-source{font-size:10px;color:#89909a;padding:3px 0 9px;line-height:1.4}.practice-ma{font-size:10px;color:#9174ac;white-space:nowrap;overflow:hidden;margin:8px 0 3px}.practice-price-line{align-items:center}.practice-funding{font-size:11px;margin:4px 0 9px;color:#333}.practice-depth-label,.practice-depth-row{display:flex;justify-content:space-between;gap:4px;font-size:11px;font-variant-numeric:tabular-nums}.practice-depth-row{position:relative;padding:4px 2px;isolation:isolate}.practice-depth-row:before{position:absolute;content:'';right:0;top:0;bottom:0;width:var(--depth,0%);z-index:-1;background:#fef0f1}.practice-depth-row.bid:before{background:#e9f8ef}.practice-depth-row.ask span:first-child{color:#d44766}.practice-depth-row.bid span:first-child{color:#159c72}.practice-book-mid{font-size:20px;text-align:left;margin:5px 0 0}.practice-book-note{font-size:10px}.practice-only-position{font-size:14px;color:#202630;font-weight:700;padding:12px 3px;border-bottom:3px solid #eab92c}.practice-record-details{margin-top:18px;border-top:1px solid #e9ebef;padding:12px 0}.practice-record-details summary{font-size:12px;color:#737b88;cursor:pointer}.practice-assets{padding:6px 0}.practice-leverage-row select{font-size:12px}.practice-risk-output{font-size:10px}.practice-trade-grid{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr)}.practice-warning{font-size:10px}
 </style>
+<style id="practice-paused-style">#practicePanel,#practiceReview,#practiceAdminLink,#practiceDetailDialog{display:none!important}#practicePaused{display:none}.practice-paused{margin:16px 0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;min-height:340px;padding:48px 20px;text-align:center;align-items:center;justify-content:center;flex-direction:column;gap:12px}.practice-paused svg{width:54px;height:54px;stroke:#9ca3af;fill:none;stroke-width:1.5}.practice-paused h2{font-size:21px;color:#222;margin:0}.practice-paused p{font-size:14px;color:#777;margin:0}.practice-paused button{border:0;border-radius:6px;background:#07a85b;color:white;padding:12px 40px;font-size:14px;margin-top:14px}body[data-pro-view="records"] #practicePaused{display:flex}body[data-pro-view="records"] .work-grid,body[data-pro-view="records"] .bottom-panels{display:none!important}@media(max-width:710px){.practice-paused{margin:0;min-height:calc(65dvh);border:0;border-radius:0}}</style>
 </head>
 <body data-pro-view="market">
 <div class="shell">
@@ -169,6 +170,7 @@
     <div class="notice" id="notice"><span class="notice-symbol">i</span><span id="noticeText">正在加载交易所2小时K线；行情不足时不发布方向信号。</span></div>
 
 
+<section class="practice-paused" id="practicePaused" aria-label="暂停服务"><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="20"/><path d="M20 16v16M28 16v16" stroke-linecap="round" stroke-width="3"/></svg><h2>暂停服务</h2><p>请返回其他界面</p><button type="button" id="practiceReturn">返回行情</button></section>
 <section class="practice-panel" id="practicePanel" aria-label="实时模拟练习">
   <div class="practice-top"><h2>U本位行情 · 实时模拟</h2><span class="practice-label">虚拟练习 · 非币安官方</span></div>
   <div class="practice-warning">仅虚拟练习，无真实资金、无提现。杠杆选项仅演示风险，实际练习仓位为1倍。</div>
@@ -689,6 +691,9 @@ dialog.addEventListener('cancel',e=>{if(busy)e.preventDefault()});
 (function(){
 'use strict';
 const $=id=>document.getElementById(id),admin=document.documentElement.dataset.proAdmin==='1',panel=$('practicePanel'),symbol=$('practiceSymbol'),status=$('practiceStatus'),review=$('practiceReview');
+$('practiceReturn').onclick=()=>document.querySelector('[data-pro-tab="market"]').click();
+// Paused: keep historical markup and logic for a later deliberate restoration.
+if(true)return;
 let state=null,loading=false,reviewLoading=false,writing=false,chartSeq=0,chartAt=0,chartSymbol='',clientId=null,clientKey='';
 const number=(x,d=2)=>Number.isFinite(x)?x.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
 const date=x=>new Date(x).toLocaleString('zh-CN',{hour12:false});
