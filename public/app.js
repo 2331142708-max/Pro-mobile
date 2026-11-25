@@ -220,11 +220,48 @@
       ${m?.ready&&m?.largeMinuteSeries?.length?`<div class="classic-spark-head">近30分钟大额买卖分布</div>${sparkBars(m.largeMinuteSeries)}`:''}
     </section>`;
   }
+
+  let classicLive=null,classicLiveBusy=false,classicLiveGeneration=0,classicLiveTimer=null,classicAgeTimer=null,classicLiveMono=0,classicLiveRtt=0;
+  const classicStamp=t=>Number.isFinite(t)&&t>0?new Date(t).toLocaleTimeString('zh-CN',{hour12:false}):'—';
+  function classicElapsed(){return Math.max(0,performance.now()-classicLiveMono)+classicLiveRtt/2}
+  function paintClassicAge(){
+    const q=$('classicLivePrice'),note=$('classicQuoteAge'),flow=$('classicFlowAge');
+    if(!q||!note)return;
+    const live=classicLive?.symbol===store.symbol?classicLive:null,quote=live?.quote;
+    if(!quote||!Number.isFinite(quote.ageMs)||!(quote.price>0)){
+      q.textContent='—';q.style.color='';note.textContent='等待最新公开报价';note.style.color='';if(flow)flow.textContent='等待实时成交统计';return;
+    }
+    const elapsed=classicElapsed(),age=quote.ageMs+elapsed,fresh=quote.fresh&&age<=2500;
+    q.textContent=price(quote.price);q.style.color=fresh?'':'#a36b20';
+    note.textContent=(fresh?'':'报价延迟 · ')+(quote.source==='aggTrade'?'最新公开成交':'公开行情报价')+' · '+classicStamp(quote.at)+' · 估计延迟 '+(age/1000).toFixed(1)+'秒';note.style.color=fresh?'':'#a36b20';
+    if(flow){
+      const at=live.micro?.latestAt;
+      const ms=Number.isFinite(at)&&at>0?Math.max(0,live.serverTime-at)+elapsed:null;
+      const stale=elapsed>3500||ms===null||ms>3500;
+      flow.textContent=ms===null?'成交统计等待真实样本':(stale?'成交数据延迟 · ':'成交采样 · ')+classicStamp(at)+' · 估计延迟 '+(ms/1000).toFixed(1)+'秒';
+      flow.style.color=stale?'#a36b20':'';
+      const area=$('classicFlowArea');if(area)area.style.opacity=stale?'.65':'1';
+    }
+  }
+  async function refreshClassicLive(){
+    if(!store.classicOpen||classicLiveBusy||document.visibilityState!=='visible')return;
+    const gen=classicLiveGeneration,symbol=store.symbol,start=performance.now(),controller=new AbortController();
+    classicLiveBusy=true;const timer=setTimeout(()=>controller.abort(),2800);
+    try{
+      const r=await fetch('/api/pro2/classic-live?symbol='+encodeURIComponent(symbol),{cache:'no-store',signal:controller.signal});
+      if(r.status===401){location.replace('/login');return}
+      if(!r.ok)throw Error('实时详情暂不可用');
+      const v=await r.json(),end=performance.now();
+      if(store.classicOpen&&gen===classicLiveGeneration&&symbol===store.symbol&&v.symbol===symbol){classicLive=v;classicLiveMono=end;classicLiveRtt=end-start;renderClassicDetail()}
+    }catch{if(gen===classicLiveGeneration)paintClassicAge()}
+    finally{clearTimeout(timer);classicLiveBusy=false}
+  }
   function renderClassicDetail(){
     if(!store.classicOpen)return;
     const d=store.detail,body=$('classicBody');if(!body)return;
     if(!d||d.symbol!==store.symbol){body.innerHTML='<div class="classic-loading">正在读取合约详情…</div>';return}
-    const hold=body.scrollTop,m=d.micro,p=store.snap?.marketPulse;
+    const live=classicLive?.symbol===d.symbol?classicLive:null;
+    const hold=body.scrollTop,m=live?.micro||d.micro,p=live?.marketPulse||store.snap?.marketPulse;
     const tracks=m?.forwardChecks||{},checked=tracks.total||0,aligned=tracks.aligned||0;
     const signals=(store.snap?.alerts||[]).filter(a=>a.symbol===d.symbol);
     const done=signals.filter(a=>typeof a.result?.aligned==='boolean');
@@ -233,7 +270,7 @@
     const pct30=m?.ready?recent?.buyPct:null,pct5=m?.ready?m.last5m?.buyPct:null;
     const active30=m?.ready&&pct30!==null;
     const liveCount=m?.ready&&recent?recent.buyCount+recent.sellCount:0;
-    const large=d.largeTrades||{};
+    const large=live?.largeTrades||d.largeTrades||{};
     const readyPulse=Boolean(p?.ready);
     const future=m?.ready&&m.short?(m.short.direction==='up'?'偏多':m.short.direction==='down'?'偏空':'观望'):'观望';
     const rawScore=m?.short?.score??null;
@@ -251,8 +288,9 @@
     const twoHours=d.ready?'真实已收盘2H确认':'等待2H收盘确认';
     $('classicTitle').textContent=`${d.displaySymbol||d.symbol} · 原版详情`;
     body.innerHTML=`<div class="classic-content-inner">
-      <div class="classic-kicker">MARKET SCANNER <span>● 自动观察 · ${new Date().toLocaleTimeString('zh-CN',{hour12:false})}</span></div>
+      <div class="classic-kicker">MARKET SCANNER <span>● 自动观察 · ${classicStamp(live?.serverTime||d.priceAt)}</span></div>
       <div class="classic-headline"><strong>${esc(d.displaySymbol||d.symbol)}</strong><span>${esc(d.exchangeLabel)} · ${esc(twoHours)}</span></div>
+      <div class="classic-live-quote"><strong id="classicLivePrice">—</strong><div id="classicQuoteAge">等待最新公开报价</div></div>
       <div class="classic-sample"><strong>${done.length>=20?pctText(100*correct/done.length):'样本不足'}</strong><div>2小时下一根方向一致 ${correct} / ${done.length} 笔<br>净收益率：未计算（不是交易胜率）</div></div>
       <div class="classic-desc">取各信号首次可见的新鲜报价模拟观察。每10分钟一档，30分钟后按真实报价复核；不使用未收盘2小时K线做主信号。</div>
       <div class="classic-saved">
@@ -263,19 +301,19 @@
         <div>每3分钟更新一次 · 上次计算 ${lastSample}</div>
       </div>
       <section class="classic-future">
-        <div class="classic-future-row"><strong>未来2分钟方向</strong><span>实时复核 · 页面约5秒更新</span></div>
+        <div class="classic-future-row"><strong>未来2分钟方向</strong><span>历史规则复核 · 独立于实时报价</span></div>
         <div class="classic-future-value ${cls(m?.short?.direction)}">${future}</div>
         <div class="classic-future-score">信号一致性 ${rawScore==null?'—':rawScore}/100</div>
         <div class="classic-future-text">${!m?.ready?esc(m?.reason||'该合约缺少连续公开成交数据'):esc(m?.short?.explanation||'多项条件未同向确认')}</div>
-        <div class="classic-future-foot">公开成交约5秒复核，2H K线按收盘更新。80分为规则评分，非成功率。</div>
+        <div class="classic-future-foot">公开成交持续接收，2H K线按收盘更新。80分为规则评分，非成功率。</div>
       </section>
-      <section class="classic-flows">
+      <section class="classic-flows" id="classicFlowArea"><div class="classic-muted" id="classicFlowAge">等待实时成交统计</div>
         <div class="classic-section-row"><strong>大户实时买卖额</strong><span>单笔 &gt; 100万计价币种单位</span></div>
         <div class="classic-line">主动买入 ${large.covered?classicNumber(largeBuy):'—'} ${esc(d.quoteAsset||'USDT')} / 主动卖出 ${large.covered?classicNumber(largeSell):'—'} ${esc(d.quoteAsset||'USDT')}</div>
         <div class="classic-muted">${nextClear} 整点清零 · ${large.covered?'已收到真实成交，本小时累计（非全市场数据）':esc(large.reason||'等待公开成交数据流')}</div>
         <div class="classic-muted">盘中资金活跃度 · ${m?.ready?esc(m.activity||'数据不足'):'等待5分钟数据'}</div>
-        <div class="classic-line">近30秒（页面约5秒刷新） · 主动买 ${active30?pctText(pct30):'—'} / 主动卖 ${active30?pctText(100-pct30):'—'}</div>
-        ${active30?`<div class="classic-liveflow-caption">近30秒公开成交（不设大单门槛）：${amount((recent?.buy||0)+(recent?.sell||0))} ${esc(d.quoteAsset||'USDT')} · ${liveCount} 条${m.sample30Partial?'（接入不足30秒）':''} · 更新于 ${tm(m.latestAt)}</div>${sideBar(pct30)}`:`<div class="classic-muted">${esc(m?.reason||'等待连续30秒有效成交')}</div>`}
+        <div class="classic-line">近30秒（页面约1秒刷新） · 主动买 ${active30?pctText(pct30):'—'} / 主动卖 ${active30?pctText(100-pct30):'—'}</div>
+        ${active30?`<div class="classic-liveflow-caption">近30秒公开成交（不设大单门槛）：${amount((recent?.buy||0)+(recent?.sell||0))} ${esc(d.quoteAsset||'USDT')} · ${liveCount} 条${m.sample30Partial?'（接入不足30秒）':''} · 更新于 ${classicStamp(m.latestAt)}</div>${sideBar(pct30)}`:`<div class="classic-muted">${esc(m?.reason||'等待连续30秒有效成交')}</div>`}
         <div class="classic-line classic-strong">5分钟多空强度 · ${pct5===null||pct5===undefined?'数据不足':pct5>=60?'主动买占优':pct5<=40?'主动卖占优':'中性'}</div>
         <div class="classic-line classic-strong">10分钟五合约样本情绪（名义额合计，未换汇） · ${sentiment}</div>
         <div class="classic-line">看多强度 ${longStrength??'—'} / 看空强度 ${shortStrength??'—'} （满分100） · ${tm(p?.updatedAt)}</div>
@@ -286,17 +324,19 @@
       <div class="classic-extra"><strong>2小时主信号：</strong>${d.ready?esc(direction(d.direction)):'尚未确认'} · ${d.selected?'多条件筛选通过':d.multi?'多形态待复核':'未达到精选条件'}<br>2小时成交量相对20根均量 ${d.volumeRatio==null?'—':n(d.volumeRatio,2)+'倍'} · 点差 ${d.spreadPct==null?'—':n(d.spreadPct,3)+'%'}</div>
       <div class="classic-warning">数据仅覆盖实际接入并持续监测的合约，不是全部成交。公开聚合成交无法判定大户身份；规则强度不是胜率。本页面不执行交易。</div>
     </div>`;
-    body.scrollTop=hold;
+    body.scrollTop=hold;paintClassicAge();
   }
   function openClassicModal(){
-    store.classicOpen=true;
+    store.classicOpen=true;classicLiveGeneration++;classicLive=null;
+    clearInterval(classicLiveTimer);clearInterval(classicAgeTimer);
     $('classicBackdrop').hidden=false;
     document.body.classList.add('classic-open');
     renderClassicDetail();
     $('classicClose').focus({preventScroll:true});
+    void refreshClassicLive();classicLiveTimer=setInterval(refreshClassicLive,1000);classicAgeTimer=setInterval(paintClassicAge,250);
   }
   function closeClassicModal(){
-    store.classicOpen=false;
+    store.classicOpen=false;classicLiveGeneration++;classicLive=null;clearInterval(classicLiveTimer);clearInterval(classicAgeTimer);
     $('classicBackdrop').hidden=true;
     document.body.classList.remove('classic-open');
   }
@@ -411,6 +451,6 @@
   $('swingClose').addEventListener('click',()=>swingDialog.close());
   swingDialog.addEventListener('close',()=>{swingGeneration++;clearInterval(swingTimer);clearInterval(quoteTimer);clearInterval(quoteAgeTimer);swingTimer=null;quoteTimer=null;quoteAgeTimer=null;swingQuote=null});
 
-  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&swingDialog.open){void refreshSwingQuote();void refreshSwing()}});
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){if(swingDialog.open){void refreshSwingQuote();void refreshSwing()}if(store.classicOpen)void refreshClassicLive()}});
   void refresh();setInterval(refresh,9000);setInterval(()=>{if(store.snap&&Date.now()-store.lastDetail>=4700)void refreshDetail()},5000);
 })();

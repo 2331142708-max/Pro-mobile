@@ -944,6 +944,24 @@ function publicQuoteView(symbol,market,trade,now=Date.now()){
   return {symbol,price:q?.price??null,at:q?.at??null,source:q?.source??null,ageMs:age,fresh:age!==null&&age<=2500,serverTime:now};
 }
 
+
+const classicFlowCache=new Map();
+let classicPulseCache=null;
+function classicLiveView(symbol,now=Date.now()){
+  const market=MARKETS.get(symbol);
+  if(!market||!allowedSymbol(symbol))return null;
+  let cached=classicFlowCache.get(symbol);
+  if(!cached||now-cached.at>=750){
+    cached={at:now,micro:pro2Trades.getMicro(symbol),largeTrades:pro2Trades.getStats(symbol)};
+    classicFlowCache.set(symbol,cached);
+  }
+  if(!classicPulseCache||now-classicPulseCache.at>=2000){
+    classicPulseCache={at:now,value:pro2Trades.getMarketPulse()};
+  }
+  return {symbol,serverTime:now,quote:publicQuoteView(symbol,market,pro2Trades.getLatestPrint(symbol),now),
+    micro:cached.micro,largeTrades:cached.largeTrades,flowAt:cached.at,marketPulse:classicPulseCache.value};
+}
+
 const server=http.createServer((req,res)=>{
   let url;try{url=new URL(req.url,'http://localhost')}catch{return reply(res,400,{error:'无效请求'})}
   if(!accessGate(req,res,url))return;
@@ -961,6 +979,11 @@ const server=http.createServer((req,res)=>{
     // Public, read-only detail requests activate a bounded temporary trade stream.
     pro2Trades.watch(symbol);
     const value=pro2.detail(symbol,pro2Trades);return reply(res,value?200:404,value||{error:'合约不可用'});
+  }
+  if(url.pathname==='/api/pro2/classic-live'){
+    const symbol=(url.searchParams.get('symbol')||'').toUpperCase();
+    const value=classicLiveView(symbol);
+    return reply(res,value?200:404,value||{error:'合约不可用'});
   }
   if(url.pathname==='/api/pro2/quote'){
     const symbol=(url.searchParams.get('symbol')||'').toUpperCase(),m=MARKETS.get(symbol);
