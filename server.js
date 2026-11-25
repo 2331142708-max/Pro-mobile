@@ -773,7 +773,8 @@ function simQuote(symbol,now=Date.now()){
   const price=Number(m.price),at=Number(m.priceAt);
   return {symbol,price:Number.isFinite(price)&&price>0?price:null,at:Number.isFinite(at)?at:0,
     fresh:Number.isFinite(price)&&price>0&&Number.isFinite(at)&&at>0&&Math.abs(now-at)<45000,
-    change:Number.isFinite(m.change24h)?m.change24h:null};
+    change:Number.isFinite(m.change24h)?m.change24h:null,
+    book:m.book&&Number.isFinite(m.book.at)&&Math.abs(now-m.book.at)<30000&&m.book.bid>0&&m.book.ask>=m.book.bid?{bid:m.book.bid,ask:m.book.ask,at:m.book.at}:null};
 }
 function simRequests(){
   let files=[];try{files=fs.readdirSync(SIM_DIR)}catch(e){if(e.code!=='ENOENT')throw e}
@@ -850,7 +851,7 @@ function simRoute(req,res,url){
       const symbol=url.searchParams.get('symbol')||'';
       if(!allowedSymbol(symbol)){fail(400,'无效合约');return true}
       const m=MARKETS.get(symbol);
-      const rows=(m?.pro2?.rows||[]).slice(-40).map(b=>({o:b.o,h:b.h,l:b.l,c:b.c})).filter(b=>[b.o,b.h,b.l,b.c].every(x=>Number.isFinite(x)&&x>0));
+      const rows=(m?.pro2?.rows||[]).slice(-40).map(b=>({o:b.o,h:b.h,l:b.l,c:b.c,t:b.t,v:Number.isFinite(b.v)?b.v:null})).filter(b=>[b.o,b.h,b.l,b.c].every(x=>Number.isFinite(x)&&x>0));
       reply(res,200,{symbol,interval:'2H',rows});return true;
     }
     if(req.method==='GET'&&p==='review'){
