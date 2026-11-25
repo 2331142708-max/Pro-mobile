@@ -3,14 +3,107 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#f6f8fc">
+  <meta name="theme-color" content="#f7f7f7">
   <meta name="description" content="南柯一梦创作 · Pro Mobile。基于交易所已收盘2小时K线的合约行情观察工具。">
   <title>Pro Mobile · 南柯一梦创作</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css?v=pro4-classic-v9-five">
   <script src="/app.js?v=pro4-classic-v9-five" defer></script>
+
+  <style id="wechat-layout-v1">
+    :root{--bg:#ededed;--paper:#fff;--text:#171717;--muted:#666;--border:#e8e8e8;--blue:#3275c9;--green:#079657;--red:#d34a50;--shadow:none;--accent:#07a85b}
+    body{background:var(--bg)}
+    .head{height:65px;background:#f7f7f7;border-color:#dedede;gap:10px}
+    .mark{background:#07a85b;border-radius:8px;box-shadow:none}
+    .brand{font-weight:700}.brand span{display:none}.subtitle{color:#777;font-size:11px}
+    .main{max-width:1200px;padding:16px 18px 24px}
+    .hero{background:white;border:0;border-radius:6px;min-height:0;padding:16px 20px;gap:18px}
+    .hero h1{font-size:20px;margin:0 0 6px;letter-spacing:0;font-weight:700}.hero h1 span{color:#333}
+    .hero p{font-size:12px;color:#666;line-height:1.6}.hero p strong{color:#333}
+    .hero .section-label,.panel-heading .section-label{display:none}
+    .hero-metric strong{font-size:24px;letter-spacing:0}.hero-side{width:235px;min-width:0}
+    .meter{height:4px;margin:7px 0;background:#ececec}.meter i{background:var(--accent)}
+    .small-muted,.hero-metric span{color:#777}
+    .metric-grid{gap:0;margin:10px 0;background:white;border-radius:6px}
+    .metric{border:0;border-right:1px solid #ededed;border-radius:0;padding:12px 14px;box-shadow:none}
+    .metric:last-child{border-right:0}.metric>span{font-size:12px;color:#666}.metric strong{font-size:24px;margin:3px 0;letter-spacing:0}.metric small{font-size:10px;color:#777}
+    .notice{border:0;border-radius:5px;background:#f8f8f8;color:#626262;padding:10px 13px;margin:10px 0;font-size:12px}
+    .notice.warning{background:#fff7e6;color:#795319}
+    .work-grid{gap:12px;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}
+    .side{gap:12px}.panel{border:0;border-radius:6px;box-shadow:none}
+    .panel-heading{padding:15px 16px 10px;gap:8px}.panel-heading h2{font-size:17px;margin:0;letter-spacing:0;font-weight:700}
+    .heading-side{color:#777}.auto-dot{margin-left:7px;background:#07a85b}
+    .toolbar{padding:5px 15px 9px;gap:8px}.search{background:#f2f2f2;border:0;border-radius:7px;height:40px;color:#777}
+    .search input{font-size:14px;color:#222}.search input::placeholder{color:#888}
+    .toolbar select{background:#f6f6f6;border:0;border-radius:7px;color:#444;font-size:12px}
+    .tabs{padding:0 12px 9px;gap:4px}.tabs button{background:transparent;border-radius:4px;color:#555;font-size:13px;padding:9px 10px}
+    .tabs button.active{background:#e7f7ee;color:#087a42;font-weight:700}
+    .list-title{padding:8px 16px;color:#777;background:#fafafa;border-color:#eee;font-size:11px}
+    .market-list{max-height:none;overflow:visible}
+    .market-row{padding:13px 16px;min-height:112px;gap:8px;grid-template-columns:minmax(0,1fr) minmax(82px,auto);border-color:#eee}
+    .market-row:hover{background:#f7f7f7}.market-row.selected{background:#fafafa;border-left:3px solid #07a85b;padding-left:13px}
+    .market-row.pinned,.market-row.pinned.selected{background:#edf4ff;border-left:4px solid var(--blue);padding-left:12px}
+    .sym{font-size:16px;font-weight:700;letter-spacing:0;color:#171717}
+    .mini-btn{border:0;background:#f5f5f5;border-radius:5px;width:30px;height:30px;color:#777}
+    .mini-btn.active{background:#e4edff;color:#2468db}.mini-btn.star.active{background:#fff7e6;color:#a97913}
+    .row-meta{margin:5px 0;gap:4px}.venue{font-size:11px;color:#666;margin-left:0}
+    .tag{background:#f3f3f3;color:#666;border-radius:4px;padding:3px 5px;font-size:11px}
+    .tag.up{background:#e9f7ef;color:#087644}.tag.down{background:#fff0f0;color:#b7323a}.tag.blue{background:#eaf2ff;color:#2468db}
+    .market-sub{margin-top:4px;font-size:11px;line-height:1.5;color:#666;white-space:normal;overflow-wrap:anywhere}
+    .market-price{font-size:17px;letter-spacing:-.35px;font-weight:700;margin:3px 0 5px}
+    .market-change,.market-dir{font-size:12px}.market-dir{margin-top:7px}
+    .list-foot{padding:10px 16px;color:#777;font-size:11px}
+    .detail-content{padding:0 16px 18px}.detail-price{font-size:28px;letter-spacing:0}.detail-desc{color:#666}
+    .info-cell,.trade-box,.rule-grid>div,.aux-card,.aux-empty,.factor-box,.favorite-lines{background:#f7f7f7;border-color:#ededed;border-radius:6px}
+    .info-cell span,.rule-grid p,.minor,.aux-card p,.aux-card-title span,.verify p,.detail-desc{color:#666}
+    .signal-card{background:#f4f8f5;border-color:#e2ebe5;border-radius:6px}.signal-card strong{color:#32634a}.signal-card p{color:#666}
+    .detail-actions{justify-content:flex-start}.pill,.note-pill{color:#555;background:#f1f1f1;border-radius:4px}
+    .swing-open-button,.classic-open-button{background:#e9f7ef;border:0;color:#087644;border-radius:5px;min-height:34px;padding:7px 10px}
+    .rule-grid strong{color:#333}.bottom-panels{gap:12px;margin-top:12px}
+    footer{color:#777;padding:18px 12px;font-size:11px;line-height:1.6}
+    .pro-nav{display:none}.pro-account{margin-top:12px;padding:15px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .pro-account strong{display:block;font-size:15px}.pro-account p{margin:5px 0 0;color:#666;font-size:12px;line-height:1.5}
+    .pro-account button{background:#f4f4f4;border:1px solid #e4e4e4;border-radius:6px;padding:10px 14px;color:#333;white-space:nowrap}
+    button:focus-visible,input:focus-visible,select:focus-visible,[tabindex]:focus-visible{outline:2px solid #087a42;outline-offset:2px}
+    @media(max-width:1050px){.work-grid{grid-template-columns:minmax(0,1fr)}.side{grid-template-columns:minmax(0,1fr)}}
+    @media(max-width:710px){
+      .head{position:sticky;top:0;z-index:30;min-height:58px;height:auto;padding:9px 14px;background:#f7f7f7}
+      .head-title{gap:8px;min-width:0}.mark{width:33px;height:33px;font-size:18px;flex:none}.brand{font-size:15px}.subtitle{font-size:10px}
+      .head-right{gap:3px}.live{font-size:11px}.updated{font-size:10px;color:#777}
+      .main{padding:8px 0 calc(70px + env(safe-area-inset-bottom));min-width:0}
+      .hero{padding:13px 15px;display:flex;align-items:center;border-radius:0;gap:8px}
+      .hero-main{min-width:0;flex:1}.hero h1{font-size:16px;line-height:1.5;margin:0}.hero p{font-size:11px;margin-top:5px}
+      .hero-side{width:104px;margin:0;flex:none}.hero-metric{justify-content:flex-end;gap:3px}.hero-metric strong{font-size:20px}.hero-metric span{font-size:10px}
+      .hero-side .small-muted{font-size:10px;text-align:right;line-height:1.35}.meter{margin:5px 0}
+      .metric-grid{grid-template-columns:repeat(4,minmax(0,1fr));margin:8px 0;border-radius:0}
+      .metric{padding:10px 4px;text-align:center}.metric>span{font-size:11px;white-space:nowrap}.metric strong{font-size:21px}.metric small{display:none}
+      .notice{margin:0 0 8px;border-radius:0;padding:9px 15px;line-height:1.5}
+      .work-grid,.side,.bottom-panels{display:block;min-width:0}.panel{border-radius:0;margin-bottom:8px}
+      .panel-heading{padding:14px 15px 8px}.panel-heading h2{font-size:17px}
+      .toolbar{grid-template-columns:minmax(0,1fr) 90px;padding:5px 15px 9px}.toolbar select{padding:0 5px;font-size:11px}
+      .search{height:40px}.search input{font-size:16px}
+      .tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding:0 10px 8px}.tabs::-webkit-scrollbar{display:none}.tabs button{flex:none;padding:9px 10px;font-size:13px}
+      .market-row{min-height:106px;padding:12px 15px;grid-template-columns:minmax(0,1fr) minmax(82px,auto);gap:7px}
+      .market-row.selected{padding-left:12px}.market-row.pinned,.market-row.pinned.selected{padding-left:11px}
+      .market-name-line{gap:5px}.sym{font-size:15px}.mini-btn{width:28px;height:28px}.market-price{font-size:16px}
+      .market-sub{font-size:11px}.market-change,.market-dir{font-size:11px}.row-meta{margin:4px 0}
+      .detail-content{padding:0 15px 18px}.detail-actions{gap:6px}.alerts{max-height:none}
+      .bottom-panels{margin-top:0}.rule-grid{grid-template-columns:1fr}.rule-grid p{font-size:12px}
+      .pro-account{margin:0 0 8px;padding:16px 15px}
+      .pro-nav{position:fixed;z-index:60;bottom:0;left:0;right:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));background:#f8f8f8;border-top:1px solid #d9d9d9;padding:5px 0 calc(5px + env(safe-area-inset-bottom))}
+      .pro-nav button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:50px;border:0;background:transparent;color:#666;font-size:11px;padding:3px 0}
+      .pro-nav svg{width:23px;height:23px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+      .pro-nav button[aria-pressed="true"]{color:#078c4c;font-weight:700}
+      body[data-pro-view="market"] .side,body[data-pro-view="market"] .bottom-panels,body[data-pro-view="market"] .pro-account,body[data-pro-view="market"] footer{display:none}
+      body[data-pro-view="detail"] .hero,body[data-pro-view="detail"] .metric-grid,body[data-pro-view="detail"] .notice,body[data-pro-view="detail"] .market-panel,body[data-pro-view="detail"] .alert-panel,body[data-pro-view="detail"] .bottom-panels,body[data-pro-view="detail"] .pro-account,body[data-pro-view="detail"] footer{display:none}
+      body[data-pro-view="records"] .hero,body[data-pro-view="records"] .metric-grid,body[data-pro-view="records"] .notice,body[data-pro-view="records"] .market-panel,body[data-pro-view="records"] .detail-panel,body[data-pro-view="records"] .method,body[data-pro-view="records"] .pro-account,body[data-pro-view="records"] footer{display:none}
+      body[data-pro-view="more"] .hero,body[data-pro-view="more"] .metric-grid,body[data-pro-view="more"] .notice,body[data-pro-view="more"] .work-grid,body[data-pro-view="more"] .verify{display:none}
+      .toast{bottom:calc(78px + env(safe-area-inset-bottom));z-index:80}
+    }
+    @media(max-width:360px){.hero h1{font-size:14px}.hero-side{width:94px}.market-row{gap:5px}.sym{font-size:14px}.metric>span{font-size:10px}}
+  </style>
 </head>
-<body>
+<body data-pro-view="market">
 <div class="shell">
   <header class="head">
     <div class="head-title"><div class="mark">N</div><div><div class="brand">南柯一梦创作 <span>PRO MOBILE</span></div><div class="subtitle">合约量化观察台 · 市场研究</div></div></div>
@@ -18,7 +111,7 @@
   </header>
   <main class="main">
     <section class="hero">
-      <div class="hero-main"><span class="section-label">MARKET INTELLIGENCE / PRO 2H</span><h1>2 小时 K 线 <span>趋势与形态观察</span></h1>
+      <div class="hero-main"><span class="section-label">MARKET INTELLIGENCE / PRO 2H</span><h1>行情观察 <span>· 2H</span></h1>
       <p>仅使用交易所最新<strong>已收盘</strong>的 2 小时 K 线产生形态信号，未收盘不确认。筛选强度不是收益概率。</p></div>
       <div class="hero-side"><div class="hero-metric"><strong id="readyHero">0</strong><span>/ <span id="totalHero">0</span> 已验证周期</span></div><div class="meter"><i id="scanProgress"></i></div><span class="small-muted" id="scanHint">等待合约目录与历史K线</span></div>
     </section>
@@ -31,8 +124,8 @@
     <div class="notice" id="notice"><span class="notice-symbol">i</span><span id="noticeText">正在加载交易所2小时K线；行情不足时不发布方向信号。</span></div>
     <div class="work-grid">
       <section class="panel market-panel">
-        <div class="panel-heading"><div><span class="section-label">REAL-TIME SCANNER</span><h2>候选合约</h2></div><div class="heading-side"><span id="resultsCount">—</span><span class="auto-dot"></span> 自动更新</div></div>
-        <div class="toolbar"><label class="search"><span>⌕</span><input id="search" type="search" placeholder="搜索 BTC、ETH、ZEC 或合约代码" autocomplete="off"></label><select id="exchange" aria-label="选择交易所"><option value="all">币安 U 本位</option></select></div>
+        <div class="panel-heading"><div><span class="section-label">REAL-TIME SCANNER</span><h2>合约行情</h2></div><div class="heading-side"><span id="resultsCount">—</span><span class="auto-dot"></span> 自动更新</div></div>
+        <div class="toolbar"><label class="search"><span>⌕</span><input id="search" type="search" placeholder="搜索合约" autocomplete="off"></label><select id="exchange" aria-label="选择交易所"><option value="all">币安 U 本位</option></select></div>
         <div class="tabs" id="tabs" role="tablist" aria-label="合约筛选"><button data-filter="all" class="active">全部</button><button data-filter="pinned">置顶 <span id="pinNum">0</span></button><button data-filter="favorite">自选 <span id="favNum">0</span></button><button data-filter="up">看多</button><button data-filter="down">看空</button><button data-filter="multi">多信号</button><button data-filter="selected">精选</button></div>
         <div class="list-title"><span>合约 / 形态 / 成交</span><span>价格 / 方向</span></div>
         <div id="markets" class="market-list"><div class="empty">正在获取真实行情…</div></div>
@@ -46,9 +139,29 @@
     </div>
     <section class="bottom-panels"><div class="panel method"><div class="panel-heading"><div><span class="section-label">RULE EXPLANATION</span><h2>当前筛选规则</h2></div></div><div class="rule-grid"><div><strong>01 / 周期确认</strong><p>从币安官方接口请求 2 小时历史K线，剔除未收盘数据，并校验连续性。</p></div><div><strong>02 / 形态判断</strong><p>识别锤子线、吞没、早晨之星及结构类形态；新的一根2H收盘前不确认下一条信号。</p></div><div><strong>03 / 精选复核</strong><p>要求同向多形态、实时价格与盘口较新、成交量足够、点差不过宽，避免延伸位置过远；不是预测保证。</p></div><div><strong>04 / 大额成交</strong><p>监测指定五个合约的公开聚合成交，每条达到 100万计价币种单位（USDT 或 USDC） 才累计；整点清零，不能识别大户账户。</p></div></div></div>
     <div class="panel verify"><div class="panel-heading"><div><span class="section-label">FORWARD TRACKING</span><h2>已观察信号验证</h2></div></div><div class="verify-flex"><div><span>下一根 2H K线方向一致</span><strong id="alignment">—</strong></div><div><span>已检查样本</span><strong id="sampleCount">0</strong></div><div><span>尚待检查</span><strong id="pendingCount">0</strong></div></div><p>统计基于启动后观察并持续记录的信号。样本量不足或未覆盖手续费、滑点时，不能当作真实交易成功率。</p></div></section>
+    <section class="panel pro-account"><div><strong>私人观察台</strong><p>Pro V9 · 登录会话</p></div><form method="post" action="/logout"><button type="submit">退出登录</button></form></section>
     <footer>南柯一梦创作 · PRO MOBILE V9 · 公开行情观察，不连接账户、不提供下单功能、不保证收益。</footer>
   </main>
 </div>
+
+<nav class="pro-nav" aria-label="页面导航">
+  <button type="button" data-pro-tab="market" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="m6 16 4-5 4 3 4-7"/></svg>行情</button>
+  <button type="button" data-pro-tab="detail" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>详情</button>
+  <button type="button" data-pro-tab="records" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l4 2"/></svg>记录</button>
+  <button type="button" data-pro-tab="more" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="6" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="18" r="1.5"/></svg>更多</button>
+</nav>
+<script>
+(function(){
+  var nav=document.querySelector('.pro-nav'),tabs=Array.from(nav.querySelectorAll('[data-pro-tab]'));
+  function select(view,scroll){
+    document.body.dataset.proView=view;
+    tabs.forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.proTab===view));});
+    if(scroll)window.scrollTo(0,0);
+  }
+  nav.addEventListener('click',function(e){var b=e.target.closest('[data-pro-tab]');if(b)select(b.dataset.proTab,true);});
+  select('market',false);
+})();
+</script>
 <div id="classicBackdrop" class="classic-backdrop" hidden>
   <div class="classic-dialog" role="dialog" aria-modal="true" aria-labelledby="classicTitle">
     <div class="classic-modal-header"><span id="classicTitle">合约详情 · 原版界面</span><button type="button" id="classicClose" aria-label="关闭合约详情">×</button></div>
