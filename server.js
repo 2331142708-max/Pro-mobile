@@ -316,6 +316,24 @@ function readAccount(name){
   try{const v=JSON.parse(fs.readFileSync(path.join(ACCOUNTS,name+'.json'),'utf8'));return v.username===name&&typeof v.nickname==='string'&&/^[a-f0-9]{32}$/.test(v.salt)&&/^[a-f0-9]{64}$/.test(v.hash)?v:null}
   catch(e){if(e.code==='ENOENT')return null;throw e}
 }
+
+// Owner privilege is restricted to the account already present before the
+// confirmed enrollment cutoff. A future registration cannot obtain this role.
+const OWNER_ACCOUNT_DIGEST='3f7a55cf514d56f94a9ae453e6ecaa2f03606b7eb1117935dfc2005b42397fb1';
+const OWNER_ENROLLED_BEFORE=Date.parse('2026-11-26T04:40:00+08:00');
+function isOwnerAccount(account){
+  return !!(account&&typeof account.username==='string'&&USER_RE.test(account.username)&&
+    digest(account.username).toString('hex')===OWNER_ACCOUNT_DIGEST&&
+    Number.isSafeInteger(account.createdAt)&&account.createdAt>0&&account.createdAt<OWNER_ENROLLED_BEFORE);
+}
+function isAdmin(user){
+  if(!user||typeof user.username!=='string'||digest(user.username).toString('hex')!==OWNER_ACCOUNT_DIGEST)return false;
+  try{return isOwnerAccount(readAccount(user.username))}catch{return false}
+}
+function remainingRestriction(account,now=Date.now()){
+  return Number.isSafeInteger(account?.blockedUntil)&&account.blockedUntil>now?Math.ceil((account.blockedUntil-now)/1000):0;
+}
+
 function passwordHash(password,salt){
   return new Promise((resolve,reject)=>crypto.scrypt(password,Buffer.from(salt,'hex'),32,{N:16384,r:8,p:1,maxmem:64*1024*1024},(e,key)=>e?reject(e):resolve(key)));
 }
@@ -396,6 +414,8 @@ function accessGate(req,res,url){
         }
         const latest=readAccount(name);
         if(!latest||latest.hash!==account.hash){reject('账号状态已改变，请重新登录。',409);return}
+        const wait=remainingRestriction(latest);
+        if(wait){if(!res.destroyed)loginPage(res,'账号暂时限制登录，请在 '+wait+' 秒后重试。',423,false);return}
         if(!res.destroyed)startSession(req,res,latest);
       }catch(e){log('ACCOUNT_ERROR '+String(e.code||'internal'));if(!res.destroyed)loginPage(res,'账号操作失败，请稍后重试。',500,register)}
       finally{release()}
@@ -420,7 +440,7 @@ function shareIds(){
 function shareMeta(id,user){
   const m=JSON.parse(fs.readFileSync(path.join(SHARE_DIR,id,'meta.json'),'utf8'));
   const author=m.owner?readAccount(m.owner):null;
-  return {id,createdAt:m.createdAt,text:m.text,author:author?.nickname||m.nickname||'历史动态',avatar:author?.avatar?accountPublic(author).avatar:null,canDelete:!!(m.owner&&user&&m.owner===user.username),images:Array.from({length:m.count},(_,i)=>'/api/share/image/'+id+'/'+i)};
+  return {id,createdAt:m.createdAt,text:m.text,author:author?.nickname||m.nickname||'历史动态',avatar:author?.avatar?accountPublic(author).avatar:null,authorAccount:author?.username||null,canDelete:!!(isAdmin(user)||(m.owner&&user&&m.owner===user.username)),images:Array.from({length:m.count},(_,i)=>'/api/share/image/'+id+'/'+i)};
 }
 function shareImage(v){
   if(typeof v!=='string'||v.length>Math.ceil(SHARE_MAX/3)*4||!/^[A-Za-z0-9+/]+={0,2}$/.test(v))throw Error('图片格式或大小不符合要求');
@@ -465,8 +485,10 @@ function shareRoute(req,res,url){
       const dir=path.join(SHARE_DIR,del[1]);
       if(!fs.existsSync(dir)){fail(404,'记录不存在');return true;}
       const meta=JSON.parse(fs.readFileSync(path.join(dir,'meta.json'),'utf8'));
-      if(!user||meta.owner!==user.username){fail(403,'只能删除自己发表的动态');return true;}
-      fs.rmSync(dir,{recursive:true,force:false});reply(res,200,{ok:true});return true;
+      if(!user||(meta.owner!==user.username&&!isAdmin(user))){fail(403,'只能删除自己发表的动态');return true;}
+      fs.rmSync(dir,{recursive:true,force:false});
+      if(meta.owner!==user.username)log('ADMIN_MODERATION '+JSON.stringify({action:'delete_post',actor:user.username,target:meta.owner||null,post:del[1],at:Date.now()}));
+      reply(res,200,{ok:true});return true;
     }
     if(req.method!=='POST'||p!=='/api/share/posts'){fail(404,'接口不存在');return true;}
     if(!/^application\/json(?:;|$)/i.test(req.headers['content-type']||'')){fail(415,'仅支持JSON');req.resume();return true;}
@@ -508,7 +530,7 @@ function accountRoute(req,res,url){
   try{
     const account=readAccount(user.username);
     if(!account){fail(401,'账号不存在');return true}
-    if(req.method==='GET'&&p==='/api/account/me'){reply(res,200,accountPublic(account));return true}
+    if(req.method==='GET'&&p==='/api/account/me'){reply(res,200,{...accountPublic(account),admin:isOwnerAccount(account)});return true}
     const match=/^\/api\/account\/avatar\/([a-z0-9_]{3,24})$/.exec(p);
     if(req.method==='GET'&&match){
       const other=match[1]===user.username?account:readAccount(match[1]);
@@ -678,12 +700,55 @@ function chatRoute(req,res,url){
   }catch(e){log('CHAT_READ_ERROR '+String(e.code||'internal'));fail(500,'聊天读取失败');return true}
 }
 
+
+let moderationPending=0;
+function moderateAccount(actor,target,minutes){
+  const fail=(status,error)=>({status,data:{error}});
+  if(!isAdmin(actor))return fail(403,'需要管理员权限');
+  if(typeof target!=='string'||!USER_RE.test(target)||target===actor.username)return fail(400,'请选择其他账号');
+  if(!Number.isInteger(minutes)||minutes<0||minutes>5)return fail(400,'限制时间仅允许0至5分钟');
+  const account=readAccount(target);
+  if(!account)return fail(404,'账号不存在');
+  if(isOwnerAccount(account))return fail(403,'不能限制管理员');
+  const now=Date.now();
+  // Do not accidentally shorten an existing restriction when only kicking.
+  const until=Math.max(Number.isSafeInteger(account.blockedUntil)?account.blockedUntil:0,minutes?now+minutes*60000:0);
+  if(until>now){account.blockedUntil=until;replaceAccount(account)}
+  let revoked=0;
+  for(const [token,sess] of sessions)if(sess.user?.username===target){sessions.delete(token);revoked++}
+  log('ADMIN_MODERATION '+JSON.stringify({actor:actor.username,action:minutes?'kick_and_restrict':'kick',target,minutes,revoked,blockedUntil:until>now?until:0,at:now}));
+  return {status:200,data:{ok:true,revoked,blockedUntil:until>now?until:0}};
+}
+function moderationRoute(req,res,url){
+  if(!url.pathname.startsWith('/api/moderation/'))return false;
+  const user=currentUser(req),fail=(status,error)=>reply(res,status,{error});
+  if(!isAdmin(user)){fail(403,'需要管理员权限');req.resume();return true}
+  if(req.method!=='POST'||url.pathname!=='/api/moderation/kick'){fail(404,'接口不存在');req.resume();return true}
+  if(req.headers['x-pro-admin']!=='1'||req.headers['sec-fetch-site']==='cross-site'||!/^application\/json(?:;|$)/i.test(req.headers['content-type']||'')){fail(403,'无效操作');req.resume();return true}
+  if(Number(req.headers['content-length'])>1024||moderationPending>=2){fail(429,'请求过多或过大');req.resume();return true}
+  moderationPending++;
+  let chunks=[],size=0,done=false;
+  const finish=()=>{if(done)return false;done=true;moderationPending--;return true};
+  req.setTimeout(10000,()=>{finish();req.destroy()});req.on('aborted',finish);req.on('error',finish);req.on('close',finish);
+  req.on('data',b=>{if(done)return;size+=b.length;if(size>1024){finish();chunks=[];fail(413,'请求过大');req.resume();return}chunks.push(b)});
+  req.on('end',()=>{
+    if(!finish())return;
+    try{
+      const actor=currentUser(req);
+      if(actor?.username!==user.username||!isAdmin(actor)){fail(403,'管理员会话已失效');return}
+      let body;try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'))}catch{fail(400,'无效内容');return}
+      const r=moderateAccount(actor,body?.target,body?.minutes);reply(res,r.status,r.data);
+    }catch(e){log('MODERATION_ERROR '+String(e.code||'internal'));fail(500,'管理员操作失败')}
+  });return true;
+}
+
 const server=http.createServer((req,res)=>{
   let url;try{url=new URL(req.url,'http://localhost')}catch{return reply(res,400,{error:'无效请求'})}
   if(!accessGate(req,res,url))return;
   if(shareRoute(req,res,url))return;
   if(accountRoute(req,res,url))return;
   if(chatRoute(req,res,url))return;
+  if(moderationRoute(req,res,url))return;
   if(req.method!=='GET')return reply(res,405,{error:'只允许GET；无交易/下单API'});
   if(url.pathname==='/api/ui-error'){log('PRO_FRONTEND_ERROR '+(url.searchParams.get('message')||'unknown').slice(0,200));return reply(res,200,{ok:true})}
   if(url.pathname==='/api/pro2/snapshot')return reply(res,200,pro2.snapshot(pro2Trades));
@@ -716,7 +781,7 @@ const server=http.createServer((req,res)=>{
     if(e)return reply(res,404,{error:'Not Found'});
     if(filepath===path.join(PUBLIC,'index.html')){
       const user=currentUser(req);if(!user)return loginPage(res);
-      return reply(res,200,data.toString('utf8').replace('data-pro-account=""','data-pro-account="'+user.username+'"'),MIME['.html']);
+      return reply(res,200,data.toString('utf8').replace('data-pro-account=""','data-pro-account="'+user.username+'"').replace('data-pro-admin="0"','data-pro-admin="'+(isAdmin(user)?'1':'0')+'"'),MIME['.html']);
     }
     reply(res,200,data,MIME[path.extname(filepath)]||'application/octet-stream');
   });

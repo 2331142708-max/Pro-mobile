@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN" data-pro-account="">
+<html lang="zh-CN" data-pro-account="" data-pro-admin="0">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -8,7 +8,7 @@
   <title>Pro Mobile · 南柯一梦创作</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css?v=pro4-classic-v9-five">
-  <script src="/app.js?v=pro4-classic-v9-five-accounts" defer></script>
+  <script src="/app.js?v=pro4-classic-v9-five-accounts-admin" defer></script>
 
   <style id="wechat-layout-v1">
     :root{--bg:#ededed;--paper:#fff;--text:#171717;--muted:#666;--border:#e8e8e8;--blue:#3275c9;--green:#079657;--red:#d34a50;--shadow:none;--accent:#07a85b}
@@ -122,6 +122,10 @@
 @media(max-width:710px){.head-chat{font-size:0;padding:7px}.head-chat svg{width:23px;height:23px}.head-chat .chat-count{font-size:10px}.head{gap:5px}.head-right{flex:0 0 auto}.head-title{flex:1;min-width:0}.brand{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.chat-dialog{margin:0;width:100%;height:100dvh;max-height:100dvh;border-radius:0}.chat-header{padding-top:calc(12px + env(safe-area-inset-top))}.chat-compose{padding-bottom:calc(10px + env(safe-area-inset-bottom))}.chat-add input{font-size:16px}}
 </style>
 <style id="chat-sound-style">.me-sound{padding:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #eee}.me-sound strong{font-weight:500;font-size:15px}.me-sound small{display:block;color:#777;font-size:12px;margin-top:5px;line-height:1.5}.me-switch{position:relative;display:inline-flex;flex:none;width:46px;height:27px;cursor:pointer}.me-switch input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}.me-switch span{pointer-events:none;width:100%;height:100%;border-radius:20px;background:#c6c6c6;transition:background .15s}.me-switch span:after{content:'';display:block;width:23px;height:23px;border-radius:50%;margin:2px;background:white;box-shadow:0 1px 3px #0002;transition:transform .15s}.me-switch input:checked+span{background:#07a85b}.me-switch input:checked+span:after{transform:translateX(19px)}.me-switch input:focus-visible+span{outline:2px solid #087a42;outline-offset:3px}</style>
+
+<style id="admin-moderation-style">
+.admin-role{display:inline-block;background:#e7f7ee;color:#087a42;font-size:11px;font-weight:600;padding:3px 7px;border-radius:4px;margin:4px 0}.admin-role[hidden]{display:none}.admin-clickable{cursor:pointer;outline-offset:2px}.admin-clickable:focus-visible{outline:2px solid #07a85b}.admin-dialog{border:0;border-radius:10px;background:#fff;color:#222;padding:18px;width:min(360px,calc(100% - 28px));max-width:100%}.admin-dialog::backdrop{background:#0008}.admin-dialog h2{font-size:18px;margin:0 0 10px}.admin-dialog p{font-size:13px;line-height:1.6;color:#666;overflow-wrap:anywhere}.admin-dialog label{display:block;margin:12px 0 7px;font-size:13px}.admin-dialog select{width:100%;height:42px;font-size:16px;background:#f4f4f4;border:1px solid #ddd;border-radius:5px;color:#222}.admin-controls{display:flex;gap:10px;margin-top:16px}.admin-controls button{flex:1;padding:11px;border:0;border-radius:5px;font:inherit;background:#eee;color:#333}.admin-controls .admin-confirm{background:#c43d45;color:#fff}.admin-message{min-height:1.4em}
+</style>
 </head>
 <body data-pro-view="market">
 <div class="shell">
@@ -165,7 +169,7 @@
 <form class="circle-compose" id="circleForm"><textarea id="circleText" maxlength="2000" placeholder="记录此刻的想法、心情或生活…" aria-label="分享文字"></textarea><div id="circlePreviews" class="circle-previews"></div><div class="circle-actions"><label class="circle-upload">＋ 添加图片 <span id="circleCount">0/9</span><input id="circleFiles" type="file" accept="image/*" multiple></label><button class="circle-submit" id="circlePublish" type="submit">发表</button></div><p class="circle-status" id="circleStatus" role="status">最多2000字，9张图片。仅登录用户可见，动态显示各自昵称。</p></form><div id="circleFeed"><div class="circle-empty">正在读取分享记录…</div></div><button type="button" class="circle-load" id="circleMore" hidden>加载更多</button></section>
     
 <section class="panel pro-account me-page">
-  <div class="me-profile"><div id="meAvatar" class="me-avatar" aria-label="当前头像">N</div><div class="me-info"><strong id="accountNickname">我的账号</strong><p id="accountUsername">正在读取个人资料…</p></div></div>
+  <div class="me-profile"><div id="meAvatar" class="me-avatar" aria-label="当前头像">N</div><div class="me-info"><strong id="accountNickname">我的账号</strong><span id="adminRoleBadge" class="admin-role" hidden>管理员</span><p id="accountUsername">正在读取个人资料…</p></div></div>
   <div class="me-group">
     <button id="meFriends" class="me-friend-link" type="button"><span>添加好友 / 我的好友</span><b>›</b></button>
     <div class="me-sound"><div><strong>新消息提示音</strong><small id="chatSoundHint">进入网页后，轻触页面启用声音</small></div><label class="me-switch"><input id="chatSoundToggle" type="checkbox" checked aria-label="新消息提示音"><span></span></label></div>
@@ -231,7 +235,7 @@ const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className
 function say(s){status.textContent=s}
 async function api(url,options={}){
   const r=await fetch(url,{cache:'no-store',credentials:'same-origin',...options});
-  if(r.status===401)throw Error('登录已过期，请刷新页面重新登录');
+  if(r.status===401){window.location.replace('/login');throw Error('登录已过期，请重新登录')}
   const d=await r.json();if(!r.ok)throw Error(d.error||'操作失败');return d;
 }
 function preview(){
@@ -264,7 +268,7 @@ const fmt=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeri
 $('circleViewerClose').onclick=()=>$('circleViewer').close();
 $('circleViewer').addEventListener('close',()=>$('circleViewerImage').removeAttribute('src'));
 function card(p){
-  const a=el('article','circle-post'),body=el('div'),avatar=el('div','circle-avatar');paintAvatar(avatar,p.avatar,p.author);a.append(avatar,body);body.append(el('div','circle-author',p.author||'历史动态'));
+  const a=el('article','circle-post'),body=el('div'),avatar=el('div','circle-avatar');paintAvatar(avatar,p.avatar,p.author);if(p.authorAccount)window.proAdminBind?.(avatar,p.authorAccount,p.author);a.append(avatar,body);body.append(el('div','circle-author',p.author||'历史动态'));
   if(p.text)body.append(el('p','circle-text',p.text));
   const images=el('div','circle-images');
   for(const src of p.images||[]){
@@ -295,7 +299,7 @@ function paintAvatar(node,src,name){
 }
 let me=null,avatarChange=undefined,profileBusy=false;
 function drawMe(u){
-  me=u;$('accountNickname').textContent=u.nickname;$('accountUsername').textContent='账号：'+u.username;$('meNickname').value=u.nickname;
+  me=u;$('adminRoleBadge').hidden=!u.admin;$('accountNickname').textContent=u.nickname;$('accountUsername').textContent='账号：'+u.username;$('meNickname').value=u.nickname;
   paintAvatar($('meAvatar'),u.avatar,u.nickname);paintAvatar($('meAvatarPreview'),u.avatar,u.nickname);avatarChange=undefined;$('meAvatarFile').value='';
 }
 async function loadMe(){try{drawMe(await api('/api/account/me'))}catch(e){$('meProfileMessage').textContent=e.message}}
@@ -347,7 +351,7 @@ const say=t=>status.textContent=t;
 const format=t=>new Date(t).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
 async function api(endpoint,body){
   const res=await fetch('/api/chat/'+endpoint,{cache:'no-store',credentials:'same-origin',...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Pro-Chat':'1'},body:JSON.stringify(body)})});
-  if(res.status===401)throw Error('登录已过期，请刷新重新登录');
+  if(res.status===401){window.location.replace('/login');throw Error('登录已过期，请重新登录')}
   const data=await res.json();if(!res.ok)throw Error(data.error||'操作失败');return data;
 }
 function avatar(p){const n=el('div','chat-avatar',Array.from(p.nickname||'N')[0]);if(p.avatar&&/^\/api\/account\/avatar\/[a-z0-9_]{3,24}\?v=\d+$/.test(p.avatar)){const im=el('img');im.alt='头像';im.src=p.avatar;im.onerror=()=>{n.textContent=Array.from(p.nickname||'N')[0]};n.replaceChildren(im)}return n}
@@ -355,11 +359,11 @@ function renderList(data){
   list.replaceChildren();
   if(!data.items.length){list.append(el('div','chat-empty','还没有好友，输入对方的注册账号发送申请。'));return}
   for(const item of data.items){
-    const p=item.peer,row=el(item.state==='accepted'?'button':'div','chat-row'),info=el('div','chat-row-info'),side=el('div','chat-row-side');
+    const p=item.peer,row=el('div','chat-row'),info=el('div','chat-row-info'),side=el('div','chat-row-side');
     info.append(el('strong','',p.nickname),el('small','',item.state==='accepted'?(item.last?.text||'点击开始聊天'):(item.incoming?'申请添加你为好友 · '+p.username:'等待对方同意 · '+p.username)));
-    row.append(avatar(p),info,side);
+    const face=avatar(p);window.proAdminBind?.(face,p.username,p.nickname);row.append(face,info,side);
     if(item.state==='accepted'){
-      row.type='button';row.onclick=()=>openThread(p);if(item.unread)side.append(el('span','chat-unread',String(item.unread)));else if(item.last)side.append(el('span','',format(item.last.at)));
+      row.tabIndex=0;row.setAttribute('role','button');row.onclick=()=>openThread(p);row.onkeydown=e=>{if(e.target===row&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openThread(p)}};if(item.unread)side.append(el('span','chat-unread',String(item.unread)));else if(item.last)side.append(el('span','',format(item.last.at)));
     }else if(item.incoming){
       for(const [action,label,cls] of [['accept','同意','chat-positive'],['reject','拒绝','chat-reject']]){
         const b=el('button',cls,label);b.type='button';b.onclick=async()=>{b.disabled=true;try{await api(action,{peer:p.username});say(action==='accept'?'已添加好友':'已拒绝申请');await refreshList()}catch(e){say(e.message);b.disabled=false}};side.append(b)
@@ -507,6 +511,39 @@ messages.addEventListener('scroll',()=>{void markVisible()},{passive:true});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){void refreshList();if(peer&&d.open)void refreshThread()}});
 setInterval(()=>{if(document.visibilityState!=='visible')return;void refreshList();if(peer&&d.open)void refreshThread()},5000);
 void refreshList();
+})();
+</script>
+
+<dialog id="adminDialog" class="admin-dialog" aria-labelledby="adminDialogTitle">
+<h2 id="adminDialogTitle">用户管理</h2><p id="adminTarget"></p>
+<form id="adminForm"><label for="adminMinutes">强制下线后的登录限制</label><select id="adminMinutes"><option value="0">仅踢下线，可立即重新登录</option><option value="1">限制登录1分钟</option><option value="2">限制登录2分钟</option><option value="3">限制登录3分钟</option><option value="4">限制登录4分钟</option><option value="5">限制登录5分钟</option></select><p>操作会撤销该用户所有登录会话。限制到期自动恢复，不删除账号或聊天记录。</p><div class="admin-controls"><button type="button" id="adminCancel">取消</button><button type="submit" class="admin-confirm" id="adminConfirm">确认踢下线</button></div><p id="adminMessage" class="admin-message" role="status"></p></form>
+</dialog>
+<script>
+(function(){
+'use strict';
+if(document.documentElement.dataset.proAdmin!=='1')return;
+const $=id=>document.getElementById(id),dialog=$('adminDialog');
+let target=null,busy=false;
+window.proAdminBind=(node,username,nickname)=>{
+  if(!/^[a-z0-9_]{3,24}$/.test(username)||username===document.documentElement.dataset.proAccount)return;
+  node.classList.add('admin-clickable');node.tabIndex=0;node.setAttribute('role','button');node.setAttribute('aria-label','管理用户 '+nickname);
+  const open=e=>{e.stopPropagation();e.preventDefault();if(busy)return;target=username;$('adminTarget').textContent=(nickname||username)+' · 账号：'+username;$('adminMinutes').value='0';$('adminMessage').textContent='';if(!dialog.open)dialog.showModal()};
+  node.addEventListener('click',open);node.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')open(e)});
+};
+$('adminCancel').onclick=()=>{if(!busy)dialog.close()};
+dialog.addEventListener('cancel',e=>{if(busy)e.preventDefault()});
+$('adminForm').onsubmit=async e=>{
+  e.preventDefault();if(busy||!target)return;
+  const minutes=Number($('adminMinutes').value);
+  if(!confirm(minutes?'确认强制该用户下线，并限制登录 '+minutes+' 分钟？':'确认强制该用户下线？'))return;
+  busy=true;$('adminConfirm').disabled=true;$('adminCancel').disabled=true;$('adminMessage').textContent='正在执行…';
+  try{
+    const r=await fetch('/api/moderation/kick',{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json','X-Pro-Admin':'1'},body:JSON.stringify({target,minutes})});
+    if(r.status===401){window.location.replace('/login');return}
+    const data=await r.json();if(!r.ok)throw Error(data.error||'操作失败');
+    $('adminMessage').textContent='已撤销 '+data.revoked+' 个登录会话。'+(data.blockedUntil?'限制截止：'+new Date(data.blockedUntil).toLocaleTimeString('zh-CN',{hour12:false}):'可重新登录。');
+  }catch(e){$('adminMessage').textContent=e.message}finally{busy=false;$('adminConfirm').disabled=false;$('adminCancel').disabled=false}
+};
 })();
 </script>
 </body>

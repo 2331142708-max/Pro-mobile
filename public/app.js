@@ -25,7 +25,7 @@
     store.favoriteMeta[symbol]={at:Date.now(),price:m?.price||0,direction:m?.direction||'neutral',names:m?.matches?.flatMap(x=>x.names||[]).slice(0,4)||[]};
   }delete store.favoriteDiff[symbol];save();renderMarkets();renderDetail()}
   async function get(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),13000);
-    try{const res=await fetch(url,{cache:'no-store',signal:controller.signal});if(!res.ok)throw Error('HTTP '+res.status);return await res.json()}finally{clearTimeout(timer)}}
+    try{const res=await fetch(url,{cache:'no-store',signal:controller.signal});if(res.status===401){window.location.replace('/login');throw Error('登录已失效')}if(!res.ok)throw Error('HTTP '+res.status);return await res.json()}finally{clearTimeout(timer)}}
   function renderOverview(){const s=store.snap;if(!s)return;const c=s.counts;
     $('totalCount').textContent=c.eligible.toLocaleString();$('upCount').textContent=c.up;$('downCount').textContent=c.down;$('multiCount').textContent=c.multiple;
     $('readyHero').textContent=c.ready.toLocaleString();$('totalHero').textContent=c.eligible.toLocaleString();
