@@ -841,18 +841,72 @@ function simOperation(user,op,body){
   const trade={id:crypto.randomBytes(12).toString('hex'),clientId,symbol,side,price,qty,amount,at:Date.now(),quoteAt:quote.at};
   v.trades.push(trade);simSave(name,v);return ok({trade});
 }
+
+const SIM_PERIODS=['line','1s','1m','3m','5m','15m','30m','1h','2h'];
+const simDataCache=new Map();
+let simDataActive=0;
+async function simCached(key,ttl,loader){
+  const now=Date.now();let item=simDataCache.get(key);
+  if(item?.pending)return item.pending;
+  if(item&&now-item.at<ttl)return item.value;
+  if(simDataActive>=5)throw Error('行情请求繁忙');
+  item={at:now,value:null,pending:null};simDataCache.set(key,item);simDataActive++;
+  item.pending=(async()=>{try{item.value=await loader();return item.value}finally{item.at=Date.now();item.pending=null;simDataActive--}})();
+  return item.pending;
+}
+function simBar(r){
+  const [t,o,h,l,c,v]=r.map(Number);
+  return [t,o,h,l,c,v].every(Number.isFinite)&&t>0&&o>0&&l>0&&h>=Math.max(o,c,l)&&l<=Math.min(o,c)&&v>=0?{t,o,h,l,c,v}:null;
+}
+function simSecondBars(trades){
+  if(!Array.isArray(trades))return [];
+  const map=new Map();
+  for(const a of [...trades].sort((x,y)=>Number(x.T)-Number(y.T)||Number(x.a)-Number(y.a))){
+    const p=Number(a.p),q=Number(a.q),t=Math.floor(Number(a.T)/1000)*1000;
+    if(!Number.isFinite(t)||t<=0||!(p>0)||!Number.isFinite(p)||!(q>=0)||!Number.isFinite(q))continue;
+    const b=map.get(t);
+    if(b){b.h=Math.max(b.h,p);b.l=Math.min(b.l,p);b.c=p;b.v+=q}
+    else map.set(t,{t,o:p,h:p,l:p,c:p,v:q});
+  }
+  return [...map.values()].slice(-150);
+}
+async function simChartData(symbol,interval){
+  return simCached('chart:'+symbol+':'+interval,interval==='1s'?5000:15000,async()=>{
+    const query='symbol='+encodeURIComponent(symbol);
+    if(interval==='1s'){
+      const raw=await json(BINANCE+'/fapi/v1/aggTrades?'+query+'&limit=1000',8000);
+      return {symbol,interval,rows:simSecondBars(raw),source:'近期公开聚合成交按秒归并；无成交秒留空，覆盖长度随成交频率变化。'};
+    }
+    const p=interval==='line'?'1m':interval;
+    const raw=await json(BINANCE+'/fapi/v1/klines?'+query+'&interval='+p+'&limit=150',8000);
+    if(!Array.isArray(raw))throw Error('无有效K线');
+    return {symbol,interval,rows:raw.map(simBar).filter(Boolean),source:interval==='line'?'1分钟公开K线收盘价连线（末根可能未收盘）':'交易所公开K线，末根可能尚未收盘'};
+  });
+}
+async function simPublicInfo(symbol){
+  return simCached('info:'+symbol,10000,async()=>{
+    const q='symbol='+encodeURIComponent(symbol);
+    const [fund,depth]=await Promise.allSettled([json(BINANCE+'/fapi/v1/premiumIndex?'+q,7000),json(BINANCE+'/fapi/v1/depth?'+q+'&limit=5',7000)]);
+    const f=fund.status==='fulfilled'?fund.value:null,d=depth.status==='fulfilled'?depth.value:null;
+    const levels=a=>Array.isArray(a)?a.slice(0,5).map(r=>({price:Number(r[0]),qty:Number(r[1])})).filter(r=>Number.isFinite(r.price)&&Number.isFinite(r.qty)&&r.price>0&&r.qty>=0):[];
+    const rate=Number(f?.lastFundingRate),next=Number(f?.nextFundingTime),fundAt=Number(f?.time),mark=Number(f?.markPrice),at=Number(d?.T||d?.E);
+    return {symbol,funding:f&&Number.isFinite(rate)&&Number.isFinite(next)&&next>0&&Number.isFinite(fundAt)&&fundAt>0?{rate,next,at:fundAt,mark:Number.isFinite(mark)&&mark>0?mark:null}:null,
+      depth:d&&Number.isFinite(at)&&at>0?{asks:levels(d.asks),bids:levels(d.bids),at}:null};
+  });
+}
+
 function simRoute(req,res,url){
   if(!url.pathname.startsWith('/api/practice/'))return false;
   const user=currentUser(req),p=url.pathname.slice('/api/practice/'.length),fail=(status,error)=>reply(res,status,{error});
   if(!user){fail(401,'请先登录');return true}
   try{
     if(req.method==='GET'&&p==='state'){reply(res,200,simView(user.username));return true}
-    if(req.method==='GET'&&p==='chart'){
-      const symbol=url.searchParams.get('symbol')||'';
-      if(!allowedSymbol(symbol)){fail(400,'无效合约');return true}
-      const m=MARKETS.get(symbol);
-      const rows=(m?.pro2?.rows||[]).slice(-40).map(b=>({o:b.o,h:b.h,l:b.l,c:b.c,t:b.t,v:Number.isFinite(b.v)?b.v:null})).filter(b=>[b.o,b.h,b.l,b.c].every(x=>Number.isFinite(x)&&x>0));
-      reply(res,200,{symbol,interval:'2H',rows});return true;
+    if(req.method==='GET'&&(p==='chart'||p==='public-info')){
+      const symbol=url.searchParams.get('symbol')||'',interval=url.searchParams.get('interval')||'2h';
+      if(!allowedSymbol(symbol)||!SIM_PERIODS.includes(interval)){fail(400,'无效合约或周期');return true}
+      const task=p==='chart'?simChartData(symbol,interval):simPublicInfo(symbol);
+      task.then(value=>{if(!res.destroyed)reply(res,value?200:503,value||{error:'公开行情暂不可用'})}).catch(()=>{if(!res.destroyed)fail(503,'公开行情暂不可用')});
+      return true;
     }
     if(req.method==='GET'&&p==='review'){
       if(!isAdmin(user)){fail(403,'需要管理员权限');return true}
