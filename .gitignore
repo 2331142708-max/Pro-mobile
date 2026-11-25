@@ -1,0 +1,11 @@
+node_modules/
+data/
+.env
+.env.*
+*.log
+*.bak*
+*.tgz
+*.zip
+*.pem
+*.key
+.ssh/
