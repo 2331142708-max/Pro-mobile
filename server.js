@@ -566,11 +566,124 @@ function accountRoute(req,res,url){
   }catch(e){log('PROFILE_ERROR '+String(e.code||'internal'));fail(500,'账号设置读取失败');return true}
 }
 
+
+// Private friend requests and direct messages. All operations require a session.
+const CHAT_DIR=path.join(dataPath,'private-chat-v1');
+const CHAT_PAIR=/^[a-z0-9_]{3,24}\.[a-z0-9_]{3,24}\.json$/;
+const CHAT_LIMIT=500;
+let chatPending=0;
+function chatFile(a,b){return path.join(CHAT_DIR,[a,b].sort().join('.')+'.json')}
+function chatGet(a,b){
+  if(!USER_RE.test(a)||!USER_RE.test(b)||a===b)return null;
+  try{return JSON.parse(fs.readFileSync(chatFile(a,b),'utf8'))}catch(e){if(e.code==='ENOENT')return null;throw e}
+}
+function chatSave(v){
+  fs.mkdirSync(CHAT_DIR,{recursive:true,mode:0o700});
+  const tmp=path.join(CHAT_DIR,'.tmp-'+crypto.randomBytes(12).toString('hex'));
+  try{fs.writeFileSync(tmp,JSON.stringify(v),{flag:'wx',mode:0o600});fs.renameSync(tmp,chatFile(...v.users))}
+  finally{try{fs.unlinkSync(tmp)}catch{}}
+}
+function chatFiles(){
+  try{return fs.readdirSync(CHAT_DIR).filter(n=>CHAT_PAIR.test(n))}catch(e){if(e.code==='ENOENT')return [];throw e}
+}
+function chatOwnFiles(name,files=chatFiles()){
+  return files.filter(n=>{const a=n.split('.');return a[0]===name||a[1]===name});
+}
+function chatList(name){
+  const result=[];
+  for(const file of chatOwnFiles(name)){
+    const [a,b]=file.split('.'),peer=a===name?b:a,v=chatGet(name,peer),acc=readAccount(peer);
+    if(!v||!acc||!v.users.includes(name))continue;
+    const last=v.messages.at(-1),read=v.read[name]||0;
+    result.push({peer:accountPublic(acc),state:v.state,incoming:v.state==='pending'&&v.requester!==name,last:last?{text:last.text,at:last.at,from:last.from}:null,unread:v.state==='accepted'?v.messages.filter(m=>m.from!==name&&m.id>read).length:0,updatedAt:v.updatedAt});
+  }
+  result.sort((a,b)=>Number(b.incoming)-Number(a.incoming)||b.updatedAt-a.updatedAt);
+  return {items:result,unread:result.reduce((n,v)=>n+v.unread+(v.incoming?1:0),0)};
+}
+function chatOperation(name,p,body){
+  const err=(status,message)=>({status,data:{error:message}});
+  const ok=data=>({status:200,data});
+  const peer=body?.peer;
+  if(typeof peer!=='string'||!USER_RE.test(peer)||peer===name)return err(400,'请输入其他用户的正确账号');
+  const account=readAccount(peer);
+  if(!account)return err(404,'未找到该账号');
+  let v=chatGet(name,peer);
+  if(p==='request'){
+    if(v)return err(409,v.state==='accepted'?'已经是好友':'好友申请已存在');
+    const files=chatFiles();
+    if(files.length>=500||chatOwnFiles(name,files).length>=40||chatOwnFiles(peer,files).length>=40)return err(409,'好友或申请数量已达上限');
+    v={users:[name,peer].sort(),state:'pending',requester:name,updatedAt:Date.now(),messages:[],read:{[name]:0,[peer]:0}};
+    chatSave(v);return ok({ok:true});
+  }
+  if(!v||!v.users.includes(name)||!v.users.includes(peer))return err(403,'请先添加好友');
+  if(p==='accept'||p==='reject'){
+    if(v.state!=='pending'||v.requester!==peer)return err(403,'只能处理收到的好友申请');
+    if(p==='reject'){fs.unlinkSync(chatFile(name,peer));return ok({ok:true})}
+    v.state='accepted';v.updatedAt=Date.now();chatSave(v);return ok({ok:true});
+  }
+  if(v.state!=='accepted')return err(403,'好友申请尚未通过');
+  if(p==='send'){
+    const text=typeof body.text==='string'?body.text.trim():'';
+    if(!text||text.length>1000||/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(text))return err(400,'消息须为1–1000字');
+    if(v.messages.length>=CHAT_LIMIT)return err(409,'此会话已达500条保存上限');
+    const clientId=body.clientId;
+    if(typeof clientId!=='string'||!/^[a-zA-Z0-9_-]{12,80}$/.test(clientId))return err(400,'无效消息标识');
+    const previous=v.messages.find(m=>m.from===name&&m.clientId===clientId);
+    if(previous)return ok({message:previous});
+    const m={id:(v.messages.at(-1)?.id||0)+1,from:name,text,at:Date.now(),clientId};
+    v.messages.push(m);v.updatedAt=m.at;chatSave(v);return ok({message:m});
+  }
+  if(p==='read'){
+    const upTo=body.upTo;
+    if(!Number.isSafeInteger(upTo)||upTo<1)return err(400,'无效已读标记');
+    const last=v.messages.filter(m=>m.from===peer&&m.id<=upTo).at(-1);
+    if(last&&last.id>(v.read[name]||0)){v.read[name]=last.id;chatSave(v)}
+    return ok({ok:true});
+  }
+  return err(404,'接口不存在');
+}
+function chatRoute(req,res,url){
+  const prefix='/api/chat/';
+  if(!url.pathname.startsWith(prefix))return false;
+  const user=currentUser(req),p=url.pathname.slice(prefix.length),fail=(status,error)=>reply(res,status,{error});
+  if(!user){fail(401,'请先登录');return true}
+  try{
+    if(req.method==='GET'&&p==='list'){reply(res,200,chatList(user.username));return true}
+    if(req.method==='GET'&&p==='messages'){
+      const peer=url.searchParams.get('peer')||'',v=chatGet(user.username,peer);
+      if(!v||v.state!=='accepted'||!v.users.includes(user.username)){fail(403,'只能查看自己的好友会话');return true}
+      const acc=readAccount(peer);if(!acc){fail(404,'账号不存在');return true}
+      const before=url.searchParams.has('before')?Number(url.searchParams.get('before')):Infinity;
+      if(before!==Infinity&&(!Number.isSafeInteger(before)||before<1)){fail(400,'分页无效');return true}
+      const all=v.messages.filter(m=>m.id<before),messages=all.slice(-80).map(m=>({id:m.id,from:m.from,text:m.text,at:m.at}));
+      reply(res,200,{me:user.username,peer:accountPublic(acc),messages,peerRead:v.read[peer]||0,myRead:v.read[user.username]||0,hasOlder:all.length>80});return true;
+    }
+    if(req.method!=='POST'||!['request','accept','reject','send','read'].includes(p)){fail(404,'接口不存在');return true}
+    if(req.headers['x-pro-chat']!=='1'||req.headers['sec-fetch-site']==='cross-site'){fail(403,'无效请求');req.resume();return true}
+    if(!/^application\/json(?:;|$)/i.test(req.headers['content-type']||'')){fail(415,'仅支持JSON');req.resume();return true}
+    if(Number(req.headers['content-length'])>8192){fail(413,'请求过大');req.resume();return true}
+    if(chatPending>=8){fail(429,'请求过多，请稍后重试');req.resume();return true}
+    chatPending++;let parts=[],size=0,done=false;
+    const finish=()=>{if(done)return false;done=true;chatPending--;return true};
+    req.setTimeout(10000,()=>{finish();req.destroy()});req.on('aborted',finish);req.on('error',finish);req.on('close',finish);
+    req.on('data',b=>{if(done)return;size+=b.length;if(size>8192){finish();parts=[];fail(413,'请求过大');req.resume();return}parts.push(b)});
+    req.on('end',()=>{
+      if(!finish())return;
+      try{
+        if(currentUser(req)?.username!==user.username){fail(401,'登录已过期');return}
+        let body;try{body=JSON.parse(Buffer.concat(parts).toString('utf8'))}catch{fail(400,'无效请求');return}
+        const result=chatOperation(user.username,p,body);reply(res,result.status,result.data);
+      }catch(e){log('CHAT_WRITE_ERROR '+String(e.code||'internal'));fail(500,'消息操作失败，请稍后重试')}
+    });return true;
+  }catch(e){log('CHAT_READ_ERROR '+String(e.code||'internal'));fail(500,'聊天读取失败');return true}
+}
+
 const server=http.createServer((req,res)=>{
   let url;try{url=new URL(req.url,'http://localhost')}catch{return reply(res,400,{error:'无效请求'})}
   if(!accessGate(req,res,url))return;
   if(shareRoute(req,res,url))return;
   if(accountRoute(req,res,url))return;
+  if(chatRoute(req,res,url))return;
   if(req.method!=='GET')return reply(res,405,{error:'只允许GET；无交易/下单API'});
   if(url.pathname==='/api/ui-error'){log('PRO_FRONTEND_ERROR '+(url.searchParams.get('message')||'unknown').slice(0,200));return reply(res,200,{ok:true})}
   if(url.pathname==='/api/pro2/snapshot')return reply(res,200,pro2.snapshot(pro2Trades));

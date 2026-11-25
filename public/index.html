@@ -112,11 +112,21 @@
 .pro-account.me-page{display:block;padding:0;background:transparent;box-shadow:none;border:0}.me-profile{display:flex;align-items:center;gap:16px;padding:24px 16px;background:#fff;margin-bottom:10px}.me-avatar{width:72px;height:72px;flex:none;background:#07a85b;color:white;display:grid;place-items:center;overflow:hidden;border-radius:9px;font-size:29px;font-weight:700}.me-avatar img,.circle-avatar img{width:100%;height:100%;object-fit:cover;display:block}.me-info{min-width:0;flex:1}.me-info strong{font-size:21px;overflow-wrap:anywhere}.me-info p{font-size:13px;color:#777;overflow-wrap:anywhere}.me-group{background:white;margin-bottom:10px}.me-group details{border-bottom:1px solid #eee}.me-group details:last-child{border:0}.me-group summary{list-style:none;display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:17px 16px;font-size:15px;gap:12px}.me-group summary::-webkit-details-marker{display:none}.me-group summary:after{content:'›';color:#aaa;font-size:23px;line-height:1}.me-group details[open] summary:after{transform:rotate(90deg)}.me-form{padding:0 16px 16px}.me-form label{display:block;color:#666;font-size:13px;margin:10px 0 6px}.me-form input:not([type=file]){display:block;width:100%;padding:12px;background:#f7f7f7;border:1px solid #e5e5e5;border-radius:5px;color:#222;font:inherit}.me-form button.me-save{display:block;width:100%;margin-top:14px;background:#07a85b;color:white;border:0;font-weight:700}.me-form .me-avatar-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:9px 0}.me-form .me-avatar-actions label{margin:0;padding:10px;cursor:pointer;background:#f3f3f3;border-radius:5px}.me-form .me-avatar-actions input{max-width:100%;font-size:13px}.me-message{color:#666;font-size:12px;line-height:1.5;margin:10px 0;overflow-wrap:anywhere}.me-logout{margin:10px 0;background:#fff}.me-logout button{display:block;width:100%;color:#bd303a;background:#fff;border:0;padding:16px;font-size:15px}.me-note{font-size:12px;color:#777;padding:10px 16px;line-height:1.6}.circle-avatar{overflow:hidden}
 @media(max-width:710px){.pro-account.me-page{margin:0 0 8px}.me-form input:not([type=file]){font-size:16px}body[data-pro-view="more"] .me-page{display:block;order:-1}body[data-pro-view="more"] .main{display:flex;flex-direction:column}body[data-pro-view="more"] .bottom-panels{margin:0}}
 </style>
+
+<style id="pro-chat-style">
+.head-chat{position:relative;display:flex;align-items:center;gap:5px;background:transparent;border:0;padding:8px;color:#26382d;border-radius:7px;white-space:nowrap;font-size:13px}.head-chat svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.7}.chat-count{display:inline-grid;place-items:center;background:#df4247;color:white;border-radius:20px;min-width:18px;height:18px;padding:0 4px;font-size:10px;position:absolute;right:1px;top:0}.chat-count[hidden]{display:none}.head-chat:focus-visible{outline:2px solid #07a85b}
+.me-friend-link{display:flex;width:100%;align-items:center;justify-content:space-between;border:0!important;border-radius:0!important;background:#fff!important;padding:17px 16px!important;color:#222!important;font-size:15px!important;border-bottom:1px solid #eee!important;text-align:left}.me-friend-link b{color:#aaa;font-size:22px;font-weight:400}
+.chat-dialog{border:0;padding:0;width:min(630px,100%);max-width:100%;height:min(780px,94dvh);max-height:100dvh;border-radius:10px;background:#ededed;color:#171717;overflow:hidden}.chat-dialog[open]{display:flex;flex-direction:column}.chat-dialog::backdrop{background:#0008}.chat-header{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#f7f7f7;padding:13px 14px;border-bottom:1px solid #ddd;flex:none}.chat-header button{border:0;background:transparent;padding:7px;color:#333;font-size:14px}.chat-header strong{font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chat-status{font-size:12px;color:#686868;padding:5px 14px;margin:0;line-height:1.5;overflow-wrap:anywhere}.chat-status:empty{display:none}
+.chat-list-pane{flex:1;overflow:auto;min-height:0}.chat-dialog [hidden]{display:none!important}.chat-add{display:flex;gap:8px;padding:12px;background:#fff;margin-bottom:8px}.chat-add input{min-width:0;flex:1;padding:11px;border:1px solid #ddd;border-radius:5px;background:#f7f7f7;font:inherit}.chat-add button,.chat-positive{background:#07a85b;color:white;border:0;border-radius:5px;padding:10px 13px;font-size:13px;white-space:nowrap}.chat-row{display:flex;align-items:center;gap:11px;background:white;border:0;border-bottom:1px solid #eee;width:100%;padding:14px;text-align:left;color:#222;min-height:72px}.chat-row img,.chat-avatar img{width:100%;height:100%;object-fit:cover}.chat-avatar{width:44px;height:44px;border-radius:6px;background:#07a85b;color:white;font-weight:700;font-size:19px;display:grid;place-items:center;overflow:hidden;flex:none}.chat-row-info{flex:1;min-width:0}.chat-row-info strong{display:block;font-size:15px}.chat-row-info small{display:block;font-size:12px;color:#777;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;margin-top:5px}.chat-row-side{display:flex;align-items:center;gap:5px;flex:none;color:#888;font-size:12px}.chat-row-side .chat-unread{background:#df4247;color:#fff;border-radius:12px;min-width:18px;padding:3px;text-align:center}.chat-reject{border:1px solid #ddd;border-radius:5px;padding:9px;background:white;color:#555;font-size:13px}.chat-empty{padding:30px 18px;text-align:center;font-size:13px;color:#777}
+.chat-thread{display:flex;flex-direction:column;flex:1;min-height:0}.chat-messages{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:12px}.chat-older{display:block;margin:0 auto 12px;border:0;background:#dedede;color:#555;padding:7px 12px;border-radius:4px}.chat-message{display:flex;flex-direction:column;align-items:flex-start;margin:10px 0}.chat-message.mine{align-items:flex-end}.chat-time{font-size:11px;color:#777;margin:2px 0 5px}.chat-bubble{max-width:82%;white-space:pre-wrap;overflow-wrap:anywhere;background:white;color:#222;padding:10px 13px;border-radius:6px;line-height:1.55;font-size:15px}.chat-message.mine .chat-bubble{background:#95ec69}.chat-receipt{font-size:11px;color:#666;padding-top:4px}.chat-receipt.read{color:#087a42;font-weight:600}.chat-compose{display:flex;gap:8px;align-items:flex-end;padding:10px;background:#f7f7f7;border-top:1px solid #ddd;flex:none}.chat-compose textarea{flex:1;min-width:0;resize:none;border:1px solid #ddd;background:white;border-radius:5px;padding:9px;font:inherit;font-size:16px;max-height:90px;color:#222}.chat-compose button{background:#07a85b;color:#fff;border:0;border-radius:5px;padding:11px 15px;font-size:14px}
+@media(max-width:710px){.head-chat{font-size:0;padding:7px}.head-chat svg{width:23px;height:23px}.head-chat .chat-count{font-size:10px}.head{gap:5px}.head-right{flex:0 0 auto}.head-title{flex:1;min-width:0}.brand{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.chat-dialog{margin:0;width:100%;height:100dvh;max-height:100dvh;border-radius:0}.chat-header{padding-top:calc(12px + env(safe-area-inset-top))}.chat-compose{padding-bottom:calc(10px + env(safe-area-inset-bottom))}.chat-add input{font-size:16px}}
+</style>
 </head>
 <body data-pro-view="market">
 <div class="shell">
   <header class="head">
     <div class="head-title"><div class="mark">N</div><div><div class="brand">南柯一梦创作 <span>PRO MOBILE</span></div><div class="subtitle">合约量化观察台 · 市场研究</div></div></div>
+    <button id="headChat" type="button" class="head-chat" aria-label="打开聊天"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a8 8 0 0 1-8 8 9 9 0 0 1-3.5-.7L4 20l1.2-4A8 8 0 1 1 20 11.5Z"/><path d="M8 12h.01M12 12h.01M16 12h.01"/></svg><span>聊天</span><span id="chatBadge" class="chat-count" hidden>0</span></button>
     <div class="head-right"><span class="live" id="live"><i></i>正在连接</span><span class="updated" id="updated">—</span></div>
   </header>
   <main class="main">
@@ -156,6 +166,7 @@
 <section class="panel pro-account me-page">
   <div class="me-profile"><div id="meAvatar" class="me-avatar" aria-label="当前头像">N</div><div class="me-info"><strong id="accountNickname">我的账号</strong><p id="accountUsername">正在读取个人资料…</p></div></div>
   <div class="me-group">
+    <button id="meFriends" class="me-friend-link" type="button"><span>添加好友 / 我的好友</span><b>›</b></button>
     <details id="meProfileDetails"><summary>个人资料 · 头像与昵称</summary><form class="me-form" id="meProfileForm">
       <label for="meNickname">昵称</label><input id="meNickname" maxlength="24" required autocomplete="nickname">
       <label for="meAvatarFile">更换头像</label><div class="me-avatar-actions"><input id="meAvatarFile" type="file" accept="image/*"><button id="meAvatarRemove" type="button">恢复默认头像</button></div>
@@ -307,6 +318,132 @@ $('mePasswordForm').onsubmit=async e=>{
 loadMe();
 
 more.onclick=()=>load(false);document.querySelector('[data-pro-tab="circle"]').addEventListener('click',()=>load(true));if(!matchMedia('(max-width:710px)').matches)load(true);
+})();
+</script>
+
+<dialog id="chatDialog" class="chat-dialog" aria-labelledby="chatTitle">
+  <div class="chat-header"><button id="chatBack" type="button" hidden>‹ 返回</button><strong id="chatTitle">聊天</strong><button id="chatClose" type="button">关闭</button></div>
+  <p class="chat-status" id="chatStatus" role="status"></p>
+  <section id="chatListPane" class="chat-list-pane">
+    <form class="chat-add" id="chatAddForm"><input id="chatAddName" type="text" required minlength="3" maxlength="24" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="输入好友的注册账号" aria-label="好友账号"><button type="submit" id="chatAddSend">添加好友</button></form>
+    <div id="chatList"><div class="chat-empty">正在读取好友列表…</div></div>
+  </section>
+  <section id="chatThread" class="chat-thread" hidden>
+    <div id="chatMessages" class="chat-messages" role="log" aria-label="聊天消息"></div>
+    <form id="chatCompose" class="chat-compose"><textarea id="chatText" rows="2" maxlength="1000" required placeholder="输入消息…" aria-label="聊天内容"></textarea><button type="submit" id="chatSend">发送</button></form>
+  </section>
+</dialog>
+
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id),d=$('chatDialog'),status=$('chatStatus'),list=$('chatList'),messages=$('chatMessages'),badge=$('chatBadge');
+let peer=null,model=null,older=[],busy=false,threadBusy=false,listBusy=false,generation=0,sendId=null,sendText='',readPending=false;
+const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n};
+const say=t=>status.textContent=t;
+const format=t=>new Date(t).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+async function api(endpoint,body){
+  const res=await fetch('/api/chat/'+endpoint,{cache:'no-store',credentials:'same-origin',...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Pro-Chat':'1'},body:JSON.stringify(body)})});
+  if(res.status===401)throw Error('登录已过期，请刷新重新登录');
+  const data=await res.json();if(!res.ok)throw Error(data.error||'操作失败');return data;
+}
+function avatar(p){const n=el('div','chat-avatar',Array.from(p.nickname||'N')[0]);if(p.avatar&&/^\/api\/account\/avatar\/[a-z0-9_]{3,24}\?v=\d+$/.test(p.avatar)){const im=el('img');im.alt='头像';im.src=p.avatar;im.onerror=()=>{n.textContent=Array.from(p.nickname||'N')[0]};n.replaceChildren(im)}return n}
+function renderList(data){
+  list.replaceChildren();
+  if(!data.items.length){list.append(el('div','chat-empty','还没有好友，输入对方的注册账号发送申请。'));return}
+  for(const item of data.items){
+    const p=item.peer,row=el(item.state==='accepted'?'button':'div','chat-row'),info=el('div','chat-row-info'),side=el('div','chat-row-side');
+    info.append(el('strong','',p.nickname),el('small','',item.state==='accepted'?(item.last?.text||'点击开始聊天'):(item.incoming?'申请添加你为好友 · '+p.username:'等待对方同意 · '+p.username)));
+    row.append(avatar(p),info,side);
+    if(item.state==='accepted'){
+      row.type='button';row.onclick=()=>openThread(p);if(item.unread)side.append(el('span','chat-unread',String(item.unread)));else if(item.last)side.append(el('span','',format(item.last.at)));
+    }else if(item.incoming){
+      for(const [action,label,cls] of [['accept','同意','chat-positive'],['reject','拒绝','chat-reject']]){
+        const b=el('button',cls,label);b.type='button';b.onclick=async()=>{b.disabled=true;try{await api(action,{peer:p.username});say(action==='accept'?'已添加好友':'已拒绝申请');await refreshList()}catch(e){say(e.message);b.disabled=false}};side.append(b)
+      }
+    }
+    list.append(row);
+  }
+}
+async function refreshList(){
+  if(listBusy)return;listBusy=true;
+  try{
+    const data=await api('list');badge.textContent=data.unread>99?'99+':String(data.unread);badge.hidden=!data.unread;
+    if(d.open&&!peer)renderList(data);
+  }catch(e){if(d.open&&!peer)say(e.message)}finally{listBusy=false}
+}
+function renderThread(data,forceBottom=false){
+  const prev=messages.scrollTop,near=messages.scrollHeight-messages.clientHeight-prev<100;
+  messages.replaceChildren();
+  if(data.hasOlder||older.length){
+    const first=older[0]||data.messages[0];
+    if(first&&first.id>1){const b=el('button','chat-older','查看更早消息');b.type='button';b.onclick=()=>loadOlder(first.id);messages.append(b)}
+  }
+  const map=new Map();for(const m of [...older,...data.messages])map.set(m.id,m);
+  const all=[...map.values()].sort((a,b)=>a.id-b.id);
+  if(!all.length)messages.append(el('div','chat-empty','现在可以开始聊天了。'));
+  for(const m of all){
+    const mine=m.from===data.me,node=el('div','chat-message'+(mine?' mine':''));
+    node.dataset.messageId=String(m.id);if(!mine)node.dataset.incoming='1';
+    node.append(el('div','chat-time',format(m.at)),el('div','chat-bubble',m.text));
+    if(mine){const read=m.id<=data.peerRead;node.append(el('div','chat-receipt'+(read?' read':''),read?'✓✓ 已读':'✓ 已发送'))}
+    messages.append(node);
+  }
+  if(forceBottom||near)messages.scrollTop=messages.scrollHeight;else messages.scrollTop=prev;
+}
+async function markVisible(){
+  if(readPending||!d.open||!peer||!model||document.visibilityState!=='visible')return;
+  // Advance only through the newest actually visible incoming message.
+  const bounds=messages.getBoundingClientRect();let max=model.myRead||0;
+  for(const n of messages.querySelectorAll('[data-incoming]')){
+    const r=n.getBoundingClientRect();
+    if(r.bottom>bounds.top&&r.top<bounds.bottom)max=Math.max(max,Number(n.dataset.messageId));
+  }
+  if(max<=(model.myRead||0))return;
+  readPending=true;const name=peer.username,g=generation;
+  try{await api('read',{peer:name,upTo:max});if(g===generation&&model){model.myRead=Math.max(model.myRead||0,max);void refreshList()}}
+  catch(e){if(g===generation)say(e.message)}finally{readPending=false}
+}
+async function refreshThread(force=false){
+  if(threadBusy||!peer||!d.open)return;threadBusy=true;const g=generation,name=peer.username;
+  try{const data=await api('messages?peer='+encodeURIComponent(name));if(g!==generation||!d.open)return;
+    const changed=!model||JSON.stringify(model.messages)!==JSON.stringify(data.messages)||model.peerRead!==data.peerRead;
+    model=data;if(changed||force)renderThread(data,force);await markVisible();
+  }catch(e){if(g===generation)say(e.message)}finally{threadBusy=false}
+}
+async function loadOlder(before){
+  if(threadBusy||!peer)return;threadBusy=true;const g=generation,oldHeight=messages.scrollHeight,oldTop=messages.scrollTop;
+  try{const v=await api('messages?peer='+encodeURIComponent(peer.username)+'&before='+before);if(g!==generation)return;
+    older=[...v.messages,...older];if(model){renderThread(model,false);messages.scrollTop=messages.scrollHeight-oldHeight+oldTop;await markVisible()}
+  }catch(e){if(g===generation)say(e.message)}finally{threadBusy=false}
+}
+function showList(){
+  generation++;peer=null;model=null;older=[];sendId=null;sendText='';$('chatText').value='';$('chatThread').hidden=true;$('chatListPane').hidden=false;$('chatBack').hidden=true;$('chatTitle').textContent='聊天 / 好友';say('');void refreshList();
+}
+function openThread(p){
+  generation++;peer=p;model=null;older=[];sendId=null;sendText='';$('chatText').value='';$('chatTitle').textContent=p.nickname;$('chatListPane').hidden=true;$('chatThread').hidden=false;$('chatBack').hidden=false;messages.replaceChildren(el('div','chat-empty','正在读取消息…'));say('');void refreshThread(true);
+}
+function openChat(add=false){
+  if(!d.open)d.showModal();showList();if(add)$('chatAddName').focus();
+}
+$('headChat').onclick=()=>openChat();$('meFriends').onclick=()=>openChat(true);$('chatBack').onclick=showList;$('chatClose').onclick=()=>d.close();
+d.addEventListener('close',()=>{generation++;peer=null;model=null;older=[];$('chatText').value='';sendId=null;sendText='';void refreshList()});
+$('chatAddForm').onsubmit=async e=>{
+  e.preventDefault();const b=$('chatAddSend');if(b.disabled)return;b.disabled=true;
+  try{await api('request',{peer:$('chatAddName').value.trim().toLowerCase()});$('chatAddName').value='';say('好友申请已发送');await refreshList()}catch(e){say(e.message)}finally{b.disabled=false}
+};
+function messageId(){return 'm-'+Date.now()+'-'+Array.from(crypto.getRandomValues(new Uint8Array(12)),x=>x.toString(16).padStart(2,'0')).join('')}
+$('chatCompose').onsubmit=async e=>{
+  e.preventDefault();if(busy||!peer)return;const input=$('chatText'),text=input.value.trim();if(!text)return;
+  busy=true;$('chatSend').disabled=true;input.disabled=true;const g=generation,name=peer.username;
+  if(!sendId||sendText!==text){sendId=messageId();sendText=text}
+  try{await api('send',{peer:name,text,clientId:sendId});if(g===generation){input.value='';sendId=null;sendText='';say('');await refreshThread(true)}}
+  catch(e){if(g===generation)say(e.message)}finally{busy=false;$('chatSend').disabled=false;input.disabled=false}
+};
+messages.addEventListener('scroll',()=>{void markVisible()},{passive:true});
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){void refreshList();if(peer&&d.open)void refreshThread()}});
+setInterval(()=>{if(document.visibilityState!=='visible')return;void refreshList();if(peer&&d.open)void refreshThread()},5000);
+void refreshList();
 })();
 </script>
 </body>
