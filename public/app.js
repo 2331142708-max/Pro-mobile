@@ -354,9 +354,40 @@
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&store.classicOpen)closeClassicModal()});
   $('classicOpen').addEventListener('click',openClassicModal);
   // SSR is independent of the 2H model. Only actual elapsed public trades are displayed.
-  const swingDialog=$('swingDialog');let swingTimer=null,swingBusy=false,swingGeneration=0;
+  const swingDialog=$('swingDialog');let swingTimer=null,swingBusy=false,swingGeneration=0,quoteTimer=null,quoteAgeTimer=null,quoteBusy=false,swingQuote=null,quoteReceivedMono=0,quoteRoundTrip=0;
   const swingNum=(x,d=3)=>x==null||!Number.isFinite(x)?'—':n(x,d);
   const swingPct=x=>x==null?'—':(x>0?'+':'')+swingNum(x)+'%';
+
+  function renderSwingQuote(){
+    const p=$('swingLivePrice'),note=$('swingQuoteStatus');
+    if(!p||!note)return;
+    const q=swingQuote;
+    if(!q||q.symbol!==store.symbol||!Number.isFinite(q.ageMs)||!(q.price>0)){
+      p.textContent='—';p.style.color='';note.textContent='等待独立公开报价';return;
+    }
+    const age=q.ageMs+Math.max(0,performance.now()-quoteReceivedMono)+quoteRoundTrip/2;
+    const fresh=q.fresh&&age<=2500;
+    p.textContent=price(q.price);p.style.color=fresh?'':'#a36b20';
+    const source=q.source==='aggTrade'?'最新公开成交':'公开行情报价（非成交时间）';
+    note.textContent=(fresh?'':'报价延迟 · ')+source+' · '+new Date(q.at).toLocaleTimeString('zh-CN',{hour12:false})+' · 估计延迟 '+(age/1000).toFixed(1)+'秒';
+    note.style.color=fresh?'':'#a36b20';
+  }
+  async function refreshSwingQuote(){
+    if(!swingDialog.open||quoteBusy||document.visibilityState!=='visible')return;
+    const generation=swingGeneration,symbol=store.symbol,start=performance.now(),controller=new AbortController();
+    quoteBusy=true;const timer=setTimeout(()=>controller.abort(),2500);
+    try{
+      const res=await fetch('/api/pro2/quote?symbol='+encodeURIComponent(symbol),{cache:'no-store',signal:controller.signal});
+      if(res.status===401){window.location.replace('/login');return}
+      if(!res.ok)throw Error('报价接口不可用');
+      const q=await res.json(),end=performance.now();
+      if(swingDialog.open&&generation===swingGeneration&&symbol===store.symbol&&q.symbol===symbol){
+        swingQuote=q;quoteReceivedMono=end;quoteRoundTrip=end-start;renderSwingQuote();
+      }
+    }catch{if(generation===swingGeneration)renderSwingQuote()}
+    finally{clearTimeout(timer);quoteBusy=false}
+  }
+
   function swingRender(v){
     const body=$('swingBody');
     const phase=v.ready?v.phase:null;
@@ -371,13 +402,15 @@
       return `<section class="swing-card"><h3>近 ${minutes} 分钟 · 已发生</h3>${!v.ready||!r?.ready?'<p>等待连续有效样本</p>':`<div class="swing-grid"><div>实际涨跌<strong>${swingPct(r.change)}</strong></div><div>较区间低点回升<strong>${swingPct(r.rebound)}</strong></div><div>较区间高点回落<strong>${swingPct(r.pullback)}</strong></div><div>主动买 / 卖<strong>${r.buyPct==null?'—':swingNum(r.buyPct,1)+'% / '+swingNum(100-r.buyPct,1)+'%'}</strong></div></div>${r.buyPct==null?'':sideBar(r.buyPct)}<p>区间采样高 / 低：${price(r.high)} / ${price(r.low)} · ${r.count} 条公开成交</p>`}</section>`;
     }).join('');
     const blocks=v.ready&&v.blocks?.length?v.blocks.map(x=>`<div class="swing-history-row"><span>${tm(x.from)}–${tm(x.to)}</span><b>${swingPct(x.change)} / ${swingPct(x.range)}</b></div>`).join(''):'<p>连续样本不足</p>';
-    body.innerHTML=`<div class="swing-kicker">${esc(v.symbol||store.symbol)} · ${esc(v.exchangeLabel||'')} · 只读研究</div><div class="swing-price">${v.ready?price(v.price):'—'}</div><p>${esc(v.reason||'等待成交')} ${v.ready?'· 最新成交 '+new Date(v.latestAt).toLocaleTimeString('zh-CN',{hour12:false}):''}</p>${stage}${riskCard}${cards}<section class="swing-card"><h3>历史5分钟区间复核</h3><p>已发生的区间涨跌 / 高低振幅（非胜率）</p>${blocks}</section><p>使用公开成交的每秒末价采样，不是完整盘口或最高最低成交价。不生成未来方向、入场信号或盈利概率；与原2H模型独立。</p>`;
+    body.innerHTML=`<div class="swing-kicker">${esc(v.symbol||store.symbol)} · ${esc(v.exchangeLabel||'')} · 只读研究</div><div class="swing-price" id="swingLivePrice">—</div><p id="swingQuoteStatus">等待独立公开报价</p><p style="font-size:12px">统计采样：${esc(v.reason||'等待成交')} ${v.ready?'· '+new Date(v.latestAt).toLocaleTimeString('zh-CN',{hour12:false}):''}</p>${stage}${riskCard}${cards}<section class="swing-card"><h3>历史5分钟区间复核</h3><p>已发生的区间涨跌 / 高低振幅（非胜率）</p>${blocks}</section><p>使用公开成交的每秒末价采样，不是完整盘口或最高最低成交价。不生成未来方向、入场信号或盈利概率；与原2H模型独立。</p>`;
+    renderSwingQuote();
   }
   async function refreshSwing(){if(!swingDialog.open||swingBusy)return;const generation=swingGeneration,symbol=store.symbol;swingBusy=true;
     try{const v=await get('/api/pro2/swing?symbol='+encodeURIComponent(symbol));if(swingDialog.open&&generation===swingGeneration&&symbol===store.symbol)swingRender(v)}catch{if(swingDialog.open&&generation===swingGeneration)swingRender({symbol,ready:false,reason:'数据接口暂不可用，停止统计'})}finally{swingBusy=false}}
-  $('swingOpen').addEventListener('click',()=>{if(swingDialog.open)return;swingGeneration++;swingRender({symbol:store.symbol,ready:false,reason:'等待真实成交'});swingDialog.showModal();void refreshSwing();swingTimer=setInterval(refreshSwing,2000)});
+  $('swingOpen').addEventListener('click',()=>{if(swingDialog.open)return;swingGeneration++;swingRender({symbol:store.symbol,ready:false,reason:'等待真实成交'});swingQuote=null;swingDialog.showModal();void refreshSwingQuote();void refreshSwing();swingTimer=setInterval(refreshSwing,2000);quoteTimer=setInterval(refreshSwingQuote,500);quoteAgeTimer=setInterval(renderSwingQuote,250)});
   $('swingClose').addEventListener('click',()=>swingDialog.close());
-  swingDialog.addEventListener('close',()=>{swingGeneration++;clearInterval(swingTimer);swingTimer=null});
+  swingDialog.addEventListener('close',()=>{swingGeneration++;clearInterval(swingTimer);clearInterval(quoteTimer);clearInterval(quoteAgeTimer);swingTimer=null;quoteTimer=null;quoteAgeTimer=null;swingQuote=null});
 
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&swingDialog.open){void refreshSwingQuote();void refreshSwing()}});
   void refresh();setInterval(refresh,9000);setInterval(()=>{if(store.snap&&Date.now()-store.lastDetail>=4700)void refreshDetail()},5000);
 })();

@@ -8,7 +8,7 @@ const OKX_PUBLIC_WS=process.env.PRO2_OKX_TRADES_WS||'wss://ws.okx.com/ws/v5/publ
 const floorHour=t=>Math.floor(t/HOUR)*HOUR;
 const safe=(v,n=0)=>Number.isFinite(+v)?+v:n;
 function createPro2Trades({markets,log=()=>{},stopped=()=>false}){
-  const records=new Map(), observer=createObserver({markets}),lastSeen=new Map(),leases=new Map();
+  const records=new Map(), observer=createObserver({markets}),lastSeen=new Map(),leases=new Map(),latestPrint=new Map();
   const errors={binance:'',okx:''}, reconnects={binance:0,okx:0};
   const connections={binanceBase:null,okxBase:null,binanceWatch:null,okxWatch:null};
   let timer=null;
@@ -29,6 +29,8 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false}){
     if(!Number.isFinite(amount)||amount<=0||!Number.isFinite(price)||price<=0||!Number.isFinite(at)||Math.abs(Date.now()-at)>90_000)return false;
     if(side!=='buy'&&side!=='sell')return false;
     const now=Date.now();lastSeen.set(symbol,now);
+    const previous=latestPrint.get(symbol);
+    if(!previous||at>=previous.at)latestPrint.set(symbol,{price,at,receivedAt:now});
     observer.record(symbol,side,amount,price,at);
     if(amount>=MILLION){
       const start=floorHour(at),old=records.get(symbol);
@@ -143,6 +145,7 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false}){
   }
   function getMicro(symbol){const s=status(symbol);if(!s.connected)return {covered:false,ready:false,reason:s.reason};if(!s.ready)return {covered:true,ready:false,reason:s.reason,latestAt:s.latestAt||null};return observer.stats(symbol,true)}
   function getStats(symbol){const s=status(symbol),start=floorHour(Date.now()),v=records.get(symbol);if(!s.ready)return {covered:false,ready:false,threshold:MILLION,reason:s.reason};return {covered:true,ready:true,threshold:MILLION,windowStart:start,partial:true,buy:v?.start===start?v.buy:0,sell:v?.start===start?v.sell:0,buyCount:v?.start===start?v.buyCount:0,sellCount:v?.start===start?v.sellCount:0,latestAt:v?.start===start?v.latestAt:null,firstObservedAt:s.openedAt,label:'100万计价币种单位门槛的交易所聚合成交，不等于大户账户或全部真实交易',quoteAsset:markets.get(symbol)?.quoteAsset||'USDT'};}
+  function getLatestPrint(symbol){return latestPrint.get(symbol)||null;}
   function getSwing(symbol){const s=status(symbol);return s.ready?observer.swing(symbol):{version:'ssr-research-v1',ready:false,reason:s.reason,periods:[]};}
   function getMarketPulse(){return observer.marketPulse(symbol=>status(symbol).ready)}
   function health(){
@@ -152,6 +155,6 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false}){
     for(const sym of symbols){const s=status(sym);if(s.connected)out.active++;if(s.ready)out.receiving++}
     return out;
   }
-  return {start(){if(timer)return;tick();timer=setInterval(tick,5000);timer.unref?.()},stop(){if(timer)clearInterval(timer);timer=null;for(const key of Object.keys(connections)){close(connections[key],'停止');connections[key]=null;}},watch,getStats,getMicro,getSwing,getMarketPulse,health,_test:{observe,tick,status,connections}};
+  return {start(){if(timer)return;tick();timer=setInterval(tick,5000);timer.unref?.()},stop(){if(timer)clearInterval(timer);timer=null;for(const key of Object.keys(connections)){close(connections[key],'停止');connections[key]=null;}},watch,getStats,getMicro,getSwing,getLatestPrint,getMarketPulse,health,_test:{observe,tick,status,connections}};
 }
 module.exports={createPro2Trades};

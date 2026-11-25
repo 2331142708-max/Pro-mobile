@@ -930,6 +930,18 @@ function simRoute(req,res,url){
   }catch(e){log('PRACTICE_ERROR '+String(e.code||'internal'));fail(500,'模拟数据读取失败');return true}
 }
 
+
+function publicQuoteView(symbol,market,trade,now=Date.now()){
+  const valid=(p,at)=>Number.isFinite(p)&&p>0&&Number.isFinite(at)&&at>0&&at<=now+1000;
+  const tape=trade&&valid(trade.price,trade.at)?{price:trade.price,at:trade.at,receivedAt:trade.receivedAt,source:'aggTrade'}:null;
+  const ticker=valid(market?.price,market?.priceAt)?{price:market.price,at:market.priceAt,source:'ticker'}:null;
+  // Prefer the real trade time. A ticker event timestamp does not prove a new trade.
+  // If tape is stale, fall back to the separate ticker quote with its own label.
+  const q=tape&&now-tape.at<=2500?tape:ticker&&now-ticker.at<=2500?ticker:(tape&&(!ticker||tape.at>=ticker.at)?tape:ticker);
+  const age=q?Math.max(0,now-q.at):null;
+  return {symbol,price:q?.price??null,at:q?.at??null,source:q?.source??null,ageMs:age,fresh:age!==null&&age<=2500,serverTime:now};
+}
+
 const server=http.createServer((req,res)=>{
   let url;try{url=new URL(req.url,'http://localhost')}catch{return reply(res,400,{error:'无效请求'})}
   if(!accessGate(req,res,url))return;
@@ -947,6 +959,11 @@ const server=http.createServer((req,res)=>{
     // Public, read-only detail requests activate a bounded temporary trade stream.
     pro2Trades.watch(symbol);
     const value=pro2.detail(symbol,pro2Trades);return reply(res,value?200:404,value||{error:'合约不可用'});
+  }
+  if(url.pathname==='/api/pro2/quote'){
+    const symbol=(url.searchParams.get('symbol')||'').toUpperCase(),m=MARKETS.get(symbol);
+    if(!allowedSymbol(symbol)||!m)return reply(res,404,{error:'合约不可用'});
+    return reply(res,200,publicQuoteView(symbol,m,pro2Trades.getLatestPrint(symbol)));
   }
   if(url.pathname==='/api/pro2/swing'){
     const symbol=(url.searchParams.get('symbol')||'').toUpperCase();
