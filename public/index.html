@@ -126,6 +126,10 @@
 <style id="admin-moderation-style">
 .admin-role{display:inline-block;background:#e7f7ee;color:#087a42;font-size:11px;font-weight:600;padding:3px 7px;border-radius:4px;margin:4px 0}.admin-role[hidden]{display:none}.admin-clickable{cursor:pointer;outline-offset:2px}.admin-clickable:focus-visible{outline:2px solid #07a85b}.admin-dialog{border:0;border-radius:10px;background:#fff;color:#222;padding:18px;width:min(360px,calc(100% - 28px));max-width:100%}.admin-dialog::backdrop{background:#0008}.admin-dialog h2{font-size:18px;margin:0 0 10px}.admin-dialog p{font-size:13px;line-height:1.6;color:#666;overflow-wrap:anywhere}.admin-dialog label{display:block;margin:12px 0 7px;font-size:13px}.admin-dialog select{width:100%;height:42px;font-size:16px;background:#f4f4f4;border:1px solid #ddd;border-radius:5px;color:#222}.admin-controls{display:flex;gap:10px;margin-top:16px}.admin-controls button{flex:1;padding:11px;border:0;border-radius:5px;font:inherit;background:#eee;color:#333}.admin-controls .admin-confirm{background:#c43d45;color:#fff}.admin-message{min-height:1.4em}
 </style>
+<style id="circle-person-style">
+.circle-person-link{cursor:pointer;outline-offset:3px}.circle-person-link:focus-visible{outline:2px solid #07a85b}
+.circle-person-dialog{width:min(350px,calc(100% - 32px));border:0;border-radius:10px;padding:20px;background:white;color:#222}.circle-person-dialog::backdrop{background:#0008}.person-card{display:flex;align-items:center;gap:14px;padding:6px 0 16px;border-bottom:1px solid #eee}.person-card .circle-avatar{width:62px;height:62px;font-size:24px}.person-card strong{font-size:18px;overflow-wrap:anywhere}.person-card p{font-size:13px;color:#777;margin:6px 0 0;overflow-wrap:anywhere}.person-action{display:block;width:100%;padding:13px 10px;border:0;border-radius:5px;background:#07a85b;color:white;font-size:15px;margin-top:12px}.person-secondary{background:#f0f0f0;color:#333}.person-moderate{background:#fff1f1;color:#b5363d}.person-status{font-size:12px;color:#666;line-height:1.5;min-height:1.5em}
+</style>
 </head>
 <body data-pro-view="market">
 <div class="shell">
@@ -268,7 +272,7 @@ const fmt=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeri
 $('circleViewerClose').onclick=()=>$('circleViewer').close();
 $('circleViewer').addEventListener('close',()=>$('circleViewerImage').removeAttribute('src'));
 function card(p){
-  const a=el('article','circle-post'),body=el('div'),avatar=el('div','circle-avatar');paintAvatar(avatar,p.avatar,p.author);if(p.authorAccount)window.proAdminBind?.(avatar,p.authorAccount,p.author);a.append(avatar,body);body.append(el('div','circle-author',p.author||'历史动态'));
+  const a=el('article','circle-post'),body=el('div'),avatar=el('div','circle-avatar');paintAvatar(avatar,p.avatar,p.author);if(p.authorAccount)window.proCirclePersonBind?.(avatar,p.authorAccount,p.author,p.avatar);a.append(avatar,body);body.append(el('div','circle-author',p.author||'历史动态'));
   if(p.text)body.append(el('p','circle-text',p.text));
   const images=el('div','circle-images');
   for(const src of p.images||[]){
@@ -490,6 +494,7 @@ function showList(){
 function openThread(p){
   generation++;peer=p;model=null;older=[];sendId=null;sendText='';$('chatText').value='';$('chatTitle').textContent=p.nickname;$('chatListPane').hidden=true;$('chatThread').hidden=false;$('chatBack').hidden=false;messages.replaceChildren(el('div','chat-empty','正在读取消息…'));say('');void refreshThread(true);
 }
+window.proOpenFriendChat=p=>{if(!d.open)d.showModal();openThread(p)};
 function openChat(add=false){
   if(!d.open)d.showModal();showList();if(add)$('chatAddName').focus();
 }
@@ -524,10 +529,14 @@ void refreshList();
 if(document.documentElement.dataset.proAdmin!=='1')return;
 const $=id=>document.getElementById(id),dialog=$('adminDialog');
 let target=null,busy=false;
+window.proAdminOpen=(username,nickname)=>{
+  if(!/^[a-z0-9_]{3,24}$/.test(username)||username===document.documentElement.dataset.proAccount||busy)return;
+  target=username;$('adminTarget').textContent=(nickname||username)+' · 账号：'+username;$('adminMinutes').value='0';$('adminMessage').textContent='';if(!dialog.open)dialog.showModal();
+};
 window.proAdminBind=(node,username,nickname)=>{
   if(!/^[a-z0-9_]{3,24}$/.test(username)||username===document.documentElement.dataset.proAccount)return;
   node.classList.add('admin-clickable');node.tabIndex=0;node.setAttribute('role','button');node.setAttribute('aria-label','管理用户 '+nickname);
-  const open=e=>{e.stopPropagation();e.preventDefault();if(busy)return;target=username;$('adminTarget').textContent=(nickname||username)+' · 账号：'+username;$('adminMinutes').value='0';$('adminMessage').textContent='';if(!dialog.open)dialog.showModal()};
+  const open=e=>{e.stopPropagation();e.preventDefault();window.proAdminOpen(username,nickname)};
   node.addEventListener('click',open);node.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')open(e)});
 };
 $('adminCancel').onclick=()=>{if(!busy)dialog.close()};
@@ -544,6 +553,77 @@ $('adminForm').onsubmit=async e=>{
     $('adminMessage').textContent='已撤销 '+data.revoked+' 个登录会话。'+(data.blockedUntil?'限制截止：'+new Date(data.blockedUntil).toLocaleTimeString('zh-CN',{hour12:false}):'可重新登录。');
   }catch(e){$('adminMessage').textContent=e.message}finally{busy=false;$('adminConfirm').disabled=false;$('adminCancel').disabled=false}
 };
+})();
+</script>
+
+<dialog id="circlePersonDialog" class="circle-person-dialog" aria-label="分享圈个人资料">
+  <div class="person-card"><div class="circle-avatar" id="circlePersonAvatar">N</div><div><strong id="circlePersonName"></strong><p id="circlePersonAccount"></p></div></div>
+  <p class="person-status" id="circlePersonStatus" role="status">正在检查好友关系…</p>
+  <button type="button" id="circlePersonAction" class="person-action" disabled>添加好友</button>
+  <button type="button" id="circlePersonManage" class="person-action person-moderate" hidden>管理员 · 用户管理</button>
+  <button type="button" id="circlePersonClose" class="person-action person-secondary">关闭</button>
+</dialog>
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id),dialog=$('circlePersonDialog'),action=$('circlePersonAction'),status=$('circlePersonStatus'),manage=$('circlePersonManage');
+const me=document.documentElement.dataset.proAccount;
+let selected=null,relationship=null,generation=0,busy=false;
+async function api(route,body){
+  const r=await fetch('/api/chat/'+route,{cache:'no-store',credentials:'same-origin',...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Pro-Chat':'1'},body:JSON.stringify(body)})});
+  if(r.status===401){window.location.replace('/login');throw Error('登录已过期')}
+  const data=await r.json();if(!r.ok)throw Error(data.error||'操作失败');return data;
+}
+function avatar(p){
+  const box=$('circlePersonAvatar');box.textContent=Array.from(p.nickname||'N')[0]||'N';
+  if(p.avatar&&/^\/api\/account\/avatar\/[a-z0-9_]{3,24}\?v=\d+$/.test(p.avatar)){
+    const im=document.createElement('img');im.alt='用户头像';im.src=p.avatar;im.onerror=()=>{if(box.contains(im))box.textContent=Array.from(p.nickname||'N')[0]||'N'};box.replaceChildren(im);
+  }
+}
+function render(){
+  if(!selected)return;
+  if(selected.username===me){action.textContent='自己的账号';action.disabled=true;status.textContent='这是你自己的个人资料。';return}
+  if(relationship?.state==='accepted'){action.textContent='发送消息';status.textContent='你们已经是好友';action.disabled=busy;return}
+  if(relationship?.state==='pending'&&relationship.incoming){action.textContent='同意好友申请';status.textContent='对方已经向你发送了好友申请';action.disabled=busy;return}
+  if(relationship?.state==='pending'){action.textContent='等待对方同意';status.textContent='好友申请已发送';action.disabled=true;return}
+  action.textContent='添加好友';status.textContent='发送好友申请，对方同意后即可聊天。';action.disabled=busy;
+}
+async function load(g){
+  try{
+    const data=await api('list');if(g!==generation||!dialog.open)return;
+    relationship=data.items.find(i=>i.peer.username===selected.username)||null;render();
+  }catch(e){if(g===generation&&dialog.open){status.textContent=e.message;action.disabled=true}}
+}
+function open(username,nickname,src){
+  if(busy)return;
+  generation++;selected={username,nickname:nickname||username,avatar:src||null};relationship=null;
+  $('circlePersonName').textContent=selected.nickname;$('circlePersonAccount').textContent='账号：'+username;avatar(selected);
+  manage.hidden=document.documentElement.dataset.proAdmin!=='1'||username===me||typeof window.proAdminOpen!=='function';
+  status.textContent='正在检查好友关系…';action.textContent='添加好友';action.disabled=true;
+  if(!dialog.open)dialog.showModal();
+  if(username===me)render();else void load(generation);
+}
+window.proCirclePersonBind=(node,username,nickname,src)=>{
+  if(!/^[a-z0-9_]{3,24}$/.test(username))return;
+  node.classList.add('circle-person-link');node.tabIndex=0;node.setAttribute('role','button');node.setAttribute('aria-label','查看 '+(nickname||username)+' 的个人资料');
+  const click=e=>{e.preventDefault();e.stopPropagation();open(username,nickname,src)};
+  node.addEventListener('click',click);node.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')click(e)});
+};
+action.onclick=async()=>{
+  if(busy||!selected||action.disabled)return;
+  if(relationship?.state==='accepted'){
+    const p=relationship.peer;dialog.close();window.proOpenFriendChat?.(p);return;
+  }
+  const g=generation,peer=selected.username;busy=true;action.disabled=true;
+  try{
+    await api(relationship?.incoming?'accept':'request',{peer});
+    if(g===generation){relationship=relationship?.incoming?{state:'accepted',peer:selected}:{state:'pending',incoming:false,peer:selected};render();await load(g)}
+  }catch(e){if(g===generation){await load(g);status.textContent=e.message}}
+  finally{busy=false;if(g===generation&&dialog.open&&relationship?.state!=='pending'&&selected.username!==me)action.disabled=false}
+};
+manage.onclick=()=>{if(!busy&&selected){const p=selected;dialog.close();window.proAdminOpen?.(p.username,p.nickname)}};
+$('circlePersonClose').onclick=()=>{if(!busy)dialog.close()};
+dialog.addEventListener('cancel',e=>{if(busy)e.preventDefault()});
 })();
 </script>
 </body>
