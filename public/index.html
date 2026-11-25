@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-pro-account="">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -8,7 +8,7 @@
   <title>Pro Mobile · 南柯一梦创作</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css?v=pro4-classic-v9-five">
-  <script src="/app.js?v=pro4-classic-v9-five" defer></script>
+  <script src="/app.js?v=pro4-classic-v9-five-accounts" defer></script>
 
   <style id="wechat-layout-v1">
     :root{--bg:#ededed;--paper:#fff;--text:#171717;--muted:#666;--border:#e8e8e8;--blue:#3275c9;--green:#079657;--red:#d34a50;--shadow:none;--accent:#07a85b}
@@ -146,8 +146,8 @@
     <div class="panel verify"><div class="panel-heading"><div><span class="section-label">FORWARD TRACKING</span><h2>已观察信号验证</h2></div></div><div class="verify-flex"><div><span>下一根 2H K线方向一致</span><strong id="alignment">—</strong></div><div><span>已检查样本</span><strong id="sampleCount">0</strong></div><div><span>尚待检查</span><strong id="pendingCount">0</strong></div></div><p>统计基于启动后观察并持续记录的信号。样本量不足或未覆盖手续费、滑点时，不能当作真实交易成功率。</p></div></section>
 
 <section class="panel share-circle" id="shareCircle" aria-label="分享圈"><div class="circle-title"><h2>分享圈</h2><small>登录用户可见</small></div>
-<form class="circle-compose" id="circleForm"><textarea id="circleText" maxlength="2000" placeholder="记录此刻的想法、心情或生活…" aria-label="分享文字"></textarea><div id="circlePreviews" class="circle-previews"></div><div class="circle-actions"><label class="circle-upload">＋ 添加图片 <span id="circleCount">0/9</span><input id="circleFiles" type="file" accept="image/*" multiple></label><button class="circle-submit" id="circlePublish" type="submit">发表</button></div><p class="circle-status" id="circleStatus" role="status">最多2000字，9张图片。所有登录用户共用此分享圈。</p></form><div id="circleFeed"><div class="circle-empty">正在读取分享记录…</div></div><button type="button" class="circle-load" id="circleMore" hidden>加载更多</button></section>
-    <section class="panel pro-account"><div><strong>私人观察台</strong><p>Pro V9 · 登录会话</p></div><form method="post" action="/logout"><button type="submit">退出登录</button></form></section>
+<form class="circle-compose" id="circleForm"><textarea id="circleText" maxlength="2000" placeholder="记录此刻的想法、心情或生活…" aria-label="分享文字"></textarea><div id="circlePreviews" class="circle-previews"></div><div class="circle-actions"><label class="circle-upload">＋ 添加图片 <span id="circleCount">0/9</span><input id="circleFiles" type="file" accept="image/*" multiple></label><button class="circle-submit" id="circlePublish" type="submit">发表</button></div><p class="circle-status" id="circleStatus" role="status">最多2000字，9张图片。仅登录用户可见，动态显示各自昵称。</p></form><div id="circleFeed"><div class="circle-empty">正在读取分享记录…</div></div><button type="button" class="circle-load" id="circleMore" hidden>加载更多</button></section>
+    <section class="panel pro-account"><div><strong id="accountNickname">我的账号</strong><p id="accountUsername">Pro V9 · 登录会话</p></div><form method="post" action="/logout"><button type="submit">退出登录</button></form></section>
     <footer>南柯一梦创作 · PRO MOBILE V9 · 公开行情观察，不连接账户、不提供下单功能、不保证收益。</footer>
   </main>
 </div>
@@ -226,7 +226,7 @@ const fmt=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeri
 $('circleViewerClose').onclick=()=>$('circleViewer').close();
 $('circleViewer').addEventListener('close',()=>$('circleViewerImage').removeAttribute('src'));
 function card(p){
-  const a=el('article','circle-post'),body=el('div');a.append(el('div','circle-avatar','N'),body);body.append(el('div','circle-author','南柯一梦'));
+  const a=el('article','circle-post'),body=el('div');a.append(el('div','circle-avatar','N'),body);body.append(el('div','circle-author',p.author||'历史动态'));
   if(p.text)body.append(el('p','circle-text',p.text));
   const images=el('div','circle-images');
   for(const src of p.images||[]){
@@ -236,7 +236,7 @@ function card(p){
   if(images.children.length)body.append(images);
   const meta=el('div','circle-meta'),time=el('time','',fmt.format(new Date(p.createdAt))+' (北京时间)'),del=el('button','circle-delete','删除');time.dateTime=new Date(p.createdAt).toISOString();del.type='button';
   del.onclick=async()=>{if(!confirm('确定删除此分享及图片？'))return;del.disabled=true;try{await api('/api/share/posts/'+encodeURIComponent(p.id),{method:'DELETE',headers:{'X-Pro-Share':'1'}});a.remove();seen.delete(p.id);if(!feed.children.length)feed.append(el('div','circle-empty','还没有分享记录'));say('已删除')}catch(e){say(e.message);del.disabled=false}};
-  meta.append(time,del);body.append(meta);return a;
+  meta.append(time);if(p.canDelete)meta.append(del);body.append(meta);return a;
 }
 async function load(reset){
   if(loading)return;loading=true;more.disabled=true;
@@ -248,6 +248,7 @@ form.onsubmit=async e=>{
   try{const d=await api('/api/share/posts',{method:'POST',headers:{'Content-Type':'application/json','X-Pro-Share':'1'},body:JSON.stringify({text,images:photos})});$('circleText').value='';photos=[];preview();feed.querySelector('.circle-empty')?.remove();if(!seen.has(d.post.id)){feed.prepend(card(d.post));seen.add(d.post.id)}say('发表成功，已保存到服务器。')}
   catch(e){say(e.message)}finally{busy=false;publish.disabled=false;input.disabled=false;$('circleText').disabled=false}
 };
+api('/api/account/me').then(u=>{$('accountNickname').textContent=u.nickname;$('accountUsername').textContent='账号：'+u.username}).catch(()=>{});
 more.onclick=()=>load(false);document.querySelector('[data-pro-tab="circle"]').addEventListener('click',()=>load(true));if(!matchMedia('(max-width:710px)').matches)load(true);
 })();
 </script>

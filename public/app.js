@@ -10,12 +10,13 @@
   const cls=d=>d==='up'?'up':d==='down'?'down':'';
   const direction=d=>d==='up'?'看多':d==='down'?'看空':d==='mixed'?'方向冲突':'无形态';
   const store={classicOpen:false,snap:null,detail:null,symbol:'BTCUSDT',filter:'all',exchange:'all',query:'',max:100,pins:new Set(),favorites:new Set(),favoriteMeta:{},lastDetail:0,fetching:false,errors:0};
-  function read(key,fallback){try{const value=JSON.parse(localStorage.getItem(key));return value??fallback}catch{return fallback}}
+  const accountKey=key=>'pro-account:'+document.documentElement.dataset.proAccount+':'+key;
+  function read(key,fallback){try{const value=JSON.parse(localStorage.getItem(accountKey(key)));return value??fallback}catch{return fallback}}
   const five=new Set(['BTCUSDT','BTCUSDC','ETHUSDT','ETHUSDC','ZECUSDT']);
   store.pins=new Set(read('nk-pro2-pinned',[]).filter(x=>five.has(x)));store.favorites=new Set(read('contract-lens-pro-favorites-v1',[]).filter(x=>five.has(x)));
   store.favoriteMeta=Object.fromEntries(Object.entries(read('nk-pro2-favorite-meta',{})).filter(([x])=>five.has(x)));
   store.favoriteDiff={};
-  function save(){try{localStorage.setItem('nk-pro2-pinned',JSON.stringify([...store.pins]));localStorage.setItem('contract-lens-pro-favorites-v1',JSON.stringify([...store.favorites]));localStorage.setItem('nk-pro2-favorite-meta',JSON.stringify(store.favoriteMeta));}catch{toast('浏览器未能保存自选设置')}}
+  function save(){try{localStorage.setItem(accountKey('nk-pro2-pinned'),JSON.stringify([...store.pins]));localStorage.setItem(accountKey('contract-lens-pro-favorites-v1'),JSON.stringify([...store.favorites]));localStorage.setItem(accountKey('nk-pro2-favorite-meta'),JSON.stringify(store.favoriteMeta));}catch{toast('浏览器未能保存自选设置')}}
   let toastTimer;
   function toast(message){const el=$('toast');el.textContent=message;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),2700)}
   function togglePin(symbol){if(store.pins.has(symbol))store.pins.delete(symbol);else store.pins.add(symbol);save();renderMarkets();toast(store.pins.has(symbol)?'已蓝色置顶':'已取消置顶')}

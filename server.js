@@ -298,21 +298,39 @@ function reply(res,status,body,contentType='application/json; charset=utf-8'){
   res.end(typeof body==='string'||Buffer.isBuffer(body)?body:JSON.stringify(body));
 }
 
-// Read-only application access gate. Secrets are server-local, never in Git.
+
+// Invite-only account registration. Credentials stay in server-local data.
 const crypto=require('node:crypto');
 const ACCESS_FILE=path.join(dataPath,'.pro-access-code');
+const ACCOUNTS=path.join(dataPath,'accounts-v1');
 const SESSION_TTL=12*60*60*1000;
 const sessions=new Map();
+const USER_RE=/^[a-z0-9_]{3,24}$/;
 let failures=[],pendingLogins=0;
-const digest=value=>crypto.createHash('sha256').update(value).digest();
+const digest=v=>crypto.createHash('sha256').update(v).digest();
 function readAccessCode(){
-  try{
-    const value=fs.readFileSync(ACCESS_FILE,'utf8').trim();
-    return value.length>=8&&Buffer.byteLength(value)<=128?value:null;
-  }catch{return null;}
+  try{const v=fs.readFileSync(ACCESS_FILE,'utf8').trim();return v.length>=8&&Buffer.byteLength(v)<=128?v:null}catch{return null}
 }
-function loginPage(res,message='',status=200){
-  const html='<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pro 登录</title><style> *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f5f7;color:#15171b;font:16px system-ui,sans-serif;padding:24px}main{width:100%;max-width:380px;padding:30px;background:#fff;border:1px solid #e1e4e8;border-radius:18px;box-shadow:0 12px 40px #0000000b}h1{margin:0 0 8px;font-size:27px}p{color:#60646c;line-height:1.5}label{display:block;font-weight:600;margin:20px 0 8px}input,button{width:100%;min-height:48px;font:inherit;border-radius:9px;padding:12px}input{border:1px solid #c8cdd4}button{margin-top:16px;background:#17191d;color:#fff;border:0;font-weight:600}.msg{color:#a03925;font-size:14px}</style></head><body><main><h1>Pro V9</h1><p>南柯一梦制作 · 私人观察台</p><form method="post" action="/login"><label for="code">登录码</label><input id="code" name="code" type="password" autocomplete="current-password" required maxlength="128"><button type="submit">登录网站</button></form><p class="msg" role="status">'+message+'</p></main></body></html>';
+function readAccount(name){
+  if(!USER_RE.test(name))return null;
+  try{const v=JSON.parse(fs.readFileSync(path.join(ACCOUNTS,name+'.json'),'utf8'));return v.username===name&&typeof v.nickname==='string'&&/^[a-f0-9]{32}$/.test(v.salt)&&/^[a-f0-9]{64}$/.test(v.hash)?v:null}
+  catch(e){if(e.code==='ENOENT')return null;throw e}
+}
+function passwordHash(password,salt){
+  return new Promise((resolve,reject)=>crypto.scrypt(password,Buffer.from(salt,'hex'),32,{N:16384,r:8,p:1,maxmem:64*1024*1024},(e,key)=>e?reject(e):resolve(key)));
+}
+function saveAccount(v){
+  fs.mkdirSync(ACCOUNTS,{recursive:true,mode:0o700});
+  if(fs.readdirSync(ACCOUNTS).filter(n=>/^[a-z0-9_]{3,24}\.json$/.test(n)).length>=200)throw Error('注册人数已达上限');
+  const temp=path.join(ACCOUNTS,'.new-'+crypto.randomBytes(16).toString('hex'));
+  try{fs.writeFileSync(temp,JSON.stringify(v),{mode:0o600,flag:'wx'});fs.linkSync(temp,path.join(ACCOUNTS,v.username+'.json'))}
+  finally{try{fs.unlinkSync(temp)}catch{}}
+}
+function loginPage(res,message='',status=200,register=false){
+  const fields=register?'<label for="nickname">昵称</label><input id="nickname" name="nickname" required maxlength="24" autocomplete="nickname" placeholder="分享圈显示的名字">':'';
+  const invite=register?'<label for="invite">注册邀请码</label><input id="invite" name="invite" type="password" required maxlength="128" autocomplete="off" placeholder="原网站登录码">':'';
+  const confirm=register?'<label for="confirm">确认密码</label><input id="confirm" name="confirm" type="password" required minlength="10" maxlength="128" autocomplete="new-password">':'';
+  const html='<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pro '+(register?'注册':'登录')+'</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#ededed;color:#171717;font:16px system-ui,sans-serif;padding:20px}main{width:100%;max-width:390px;background:white;padding:28px;border-radius:12px}h1{font-size:26px;margin:0 0 7px}p{font-size:13px;color:#666;line-height:1.6}label{display:block;font-size:14px;font-weight:600;margin:16px 0 7px}input,button{width:100%;min-height:46px;font:inherit;border-radius:6px;padding:10px}input{border:1px solid #ddd;background:#fafafa}button{background:#07a85b;color:white;border:0;margin-top:20px;font-weight:700}a{color:#087a42}.msg{color:#aa3030}.warn{color:#8a5c17}</style></head><body><main><h1>Pro V9 · '+(register?'注册':'登录')+'</h1><p>南柯一梦制作 · 私人观察台</p><form method="post" action="'+(register?'/register':'/login')+'"><label for="username">账号</label><input id="username" name="username" required minlength="3" maxlength="24" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="3–24位字母、数字或下划线">'+fields+'<label for="password">密码</label><input id="password" name="password" type="password" required maxlength="128" '+(register?'minlength="10" autocomplete="new-password" placeholder="至少10位，不要使用其他账号的密码"':'autocomplete="current-password"')+'>'+confirm+invite+'<button type="submit">'+(register?'注册并登录':'登录')+'</button></form><p class="msg" role="status">'+message+'</p><p>'+(register?'已有账号？ <a href="/login">返回登录</a>':'没有账号？ <a href="/register">立即注册</a>')+'</p><p class="warn">如浏览器显示连接不安全，密码及内容可能被网络窃听。请使用本站专属密码，不要上传敏感信息。</p></main></body></html>';
   res.writeHead(status,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"});
   res.end(html);
 }
@@ -320,63 +338,74 @@ function cookieOptions(req){
   const secure=req.socket.encrypted||req.headers['x-forwarded-proto']==='https';
   return '; Path=/; HttpOnly; SameSite=Strict'+(secure?'; Secure':'');
 }
-function sessionToken(req){
-  return /(?:^|;\s*)pro_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie||'')?.[1];
+function sessionToken(req){return /(?:^|;\s*)pro_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie||'')?.[1]}
+function currentUser(req){
+  const token=sessionToken(req),session=token&&sessions.get(token);
+  if(!session||session.until<=Date.now()||!session.user)return null;
+  return session.user;
+}
+function startSession(req,res,user){
+  if(sessions.size>=256)sessions.delete(sessions.keys().next().value);
+  const token=sessionToken(req);if(token)sessions.delete(token);
+  const t=crypto.randomBytes(32).toString('hex');
+  sessions.set(t,{until:Date.now()+SESSION_TTL,user:{username:user.username,nickname:user.nickname}});
+  res.writeHead(303,{'Location':'/','Cache-Control':'no-store','Set-Cookie':'pro_session='+t+cookieOptions(req)+'; Max-Age=43200'});res.end();
 }
 function accessGate(req,res,url){
-  const now=Date.now(),code=readAccessCode();
-  const fingerprint=code?digest(code).toString('hex'):null;
-  for(const [token,s] of sessions){if(s.until<=now||s.fingerprint!==fingerprint)sessions.delete(token);}
-  const token=sessionToken(req);
-  const authorized=!!(code&&token&&sessions.has(token));
-  if(req.method==='GET'&&url.pathname==='/api/pro2/health'&&!authorized){
-    // Only a minimal liveness response for the existing deployment health check.
-    reply(res,200,{ok:true});return false;
-  }
+  const now=Date.now();for(const [t,s] of sessions)if(s.until<=now)sessions.delete(t);
+  const token=sessionToken(req),user=currentUser(req);
+  if(req.method==='GET'&&url.pathname==='/api/pro2/health'&&!user){reply(res,200,{ok:true});return false}
   if(req.method==='POST'&&url.pathname==='/logout'){
+    if(req.headers['sec-fetch-site']==='cross-site'){reply(res,403,{error:'无效请求'});return false}
     if(token)sessions.delete(token);
-    res.writeHead(303,{'Location':'/','Cache-Control':'no-store','Set-Cookie':'pro_session='+cookieOptions(req)+'; Max-Age=0'});
-    res.end();return false;
+    res.writeHead(303,{'Location':'/','Cache-Control':'no-store','Set-Cookie':'pro_session='+cookieOptions(req)+'; Max-Age=0'});res.end();return false;
   }
-  if(req.method==='POST'&&url.pathname==='/login'){
-    if(!code){loginPage(res,'管理员尚未设置登录码。',503);req.resume();return false;}
+  const register=url.pathname==='/register';
+  if(req.method==='POST'&&(register||url.pathname==='/login')){
+    if(req.headers['sec-fetch-site']==='cross-site'){reply(res,403,{error:'无效请求'});req.resume();return false}
     failures=failures.filter(t=>t>now-5*60*1000);
-    if(failures.length>=12||pendingLogins>=8){loginPage(res,'尝试次数过多，请稍后再试。',429);req.resume();return false;}
-    if(!/^application\/x-www-form-urlencoded(?:;|$)/i.test(req.headers['content-type']||'')){loginPage(res,'请求格式错误。',400);req.resume();return false;}
+    if(failures.length>=24||pendingLogins>=3){loginPage(res,'请求次数过多，请稍后再试。',429,register);req.resume();return false}
+    if(!/^application\/x-www-form-urlencoded(?:;|$)/i.test(req.headers['content-type']||'')){loginPage(res,'请求格式错误。',400,register);req.resume();return false}
     pendingLogins++;
-    let chunks=[],size=0,finished=false;
-    const finish=()=>{if(finished)return false;finished=true;pendingLogins--;return true;};
-    req.setTimeout(10000,()=>{finish();req.destroy();});
-    req.on('aborted',finish);req.on('error',finish);req.on('close',finish);
-    req.on('data',chunk=>{
-      size+=chunk.length;
-      if(size>1024){finish();req.destroy();return;}
-      if(!finished)chunks.push(chunk);
-    });
-    req.on('end',()=>{
-      if(!finish())return;
-      const submitted=new URLSearchParams(Buffer.concat(chunks).toString('utf8')).get('code')||'';
-      const current=readAccessCode();
-      if(!current||!crypto.timingSafeEqual(digest(current),digest(submitted))){
-        failures.push(Date.now());loginPage(res,'登录码错误。',401);return;
-      }
-      failures=[];
-      if(sessions.size>=256)sessions.delete(sessions.keys().next().value);
-      if(token)sessions.delete(token);
-      const newToken=crypto.randomBytes(32).toString('hex');
-      sessions.set(newToken,{until:Date.now()+SESSION_TTL,fingerprint:digest(current).toString('hex')});
-      res.writeHead(303,{'Location':'/','Cache-Control':'no-store','Set-Cookie':'pro_session='+newToken+cookieOptions(req)+'; Max-Age=43200'});
-      res.end();
-    });
-    return false;
+    let chunks=[],size=0,ended=false,released=false;
+    const release=()=>{if(!released){released=true;pendingLogins--}};
+    const abort=()=>{if(!ended){ended=true;release()}};
+    req.setTimeout(10000,()=>{abort();req.destroy()});req.on('aborted',abort);req.on('error',abort);req.on('close',abort);
+    req.on('data',chunk=>{if(ended)return;size+=chunk.length;if(size>4096){abort();req.destroy();return}chunks.push(chunk)});
+    req.on('end',async()=>{
+      if(ended)return;ended=true;
+      const reject=(msg,status=400)=>{failures.push(Date.now());if(!res.destroyed)loginPage(res,msg,status,register)};
+      try{
+        const p=new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
+        const name=(p.get('username')||'').trim().toLowerCase(),password=p.get('password')||'';
+        if(!USER_RE.test(name)||!password||Buffer.byteLength(password)>128){reject('账号或密码格式不正确。');return}
+        let account;
+        if(register){
+          const nickname=(p.get('nickname')||'').trim(),invite=readAccessCode();
+          if(!invite||!crypto.timingSafeEqual(digest(invite),digest(p.get('invite')||''))){reject('注册邀请码不正确。',403);return}
+          if(!nickname||nickname.length>24||/[\x00-\x1f\x7f]/.test(nickname)||password.length<10||password!==p.get('confirm')){reject('请填写有效昵称，密码至少10位且两次一致。');return}
+          if(readAccount(name)){reject('账号已存在，请换一个。',409);return}
+          const salt=crypto.randomBytes(16).toString('hex'),hash=(await passwordHash(password,salt)).toString('hex');
+          if(res.destroyed)return;
+          account={username:name,nickname,salt,hash,createdAt:Date.now()};
+          try{saveAccount(account)}catch(e){if(e.code==='EEXIST'){reject('账号已存在，请换一个。',409);return}throw e}
+        }else{
+          account=readAccount(name);
+          const candidate=await passwordHash(password,account?.salt||'00000000000000000000000000000000');
+          if(!account||!crypto.timingSafeEqual(candidate,Buffer.from(account.hash,'hex'))){reject('账号或密码错误。',401);return}
+        }
+        if(!res.destroyed)startSession(req,res,account);
+      }catch(e){log('ACCOUNT_ERROR '+String(e.code||'internal'));if(!res.destroyed)loginPage(res,'账号操作失败，请稍后重试。',500,register)}
+      finally{release()}
+    });return false;
   }
-  if(authorized)return true;
-  if(req.method==='GET'&&(url.pathname==='/'||url.pathname==='/index.html'||url.pathname==='/login')){
-    loginPage(res,code?'':'管理员尚未设置登录码。');return false;
+  if(req.method==='GET'&&(url.pathname==='/register'||url.pathname==='/login')){
+    loginPage(res,'',200,register);return false;
   }
+  if(user)return true;
+  if(req.method==='GET'&&(url.pathname==='/'||url.pathname==='/index.html')){loginPage(res);return false}
   reply(res,401,{error:'请先登录'});return false;
 }
-
 
 const SHARE_DIR=path.join(dataPath,'share-circle-v1');
 const SHARE_ID=/^[0-9]{13}-[a-f0-9]{24}$/;
@@ -386,9 +415,9 @@ function shareIds(){
   fs.mkdirSync(SHARE_DIR,{recursive:true,mode:0o700});
   return fs.readdirSync(SHARE_DIR,{withFileTypes:true}).filter(e=>e.isDirectory()&&SHARE_ID.test(e.name)).map(e=>e.name).sort().reverse();
 }
-function shareMeta(id){
+function shareMeta(id,user){
   const m=JSON.parse(fs.readFileSync(path.join(SHARE_DIR,id,'meta.json'),'utf8'));
-  return {id,createdAt:m.createdAt,text:m.text,images:Array.from({length:m.count},(_,i)=>'/api/share/image/'+id+'/'+i)};
+  return {id,createdAt:m.createdAt,text:m.text,author:m.nickname||'历史动态',canDelete:!!(m.owner&&user&&m.owner===user.username),images:Array.from({length:m.count},(_,i)=>'/api/share/image/'+id+'/'+i)};
 }
 function shareImage(v){
   if(typeof v!=='string'||v.length>Math.ceil(SHARE_MAX/3)*4||!/^[A-Za-z0-9+/]+={0,2}$/.test(v))throw Error('图片格式或大小不符合要求');
@@ -396,7 +425,7 @@ function shareImage(v){
   if(b.length<4||b.length>SHARE_MAX||b.toString('base64')!==v||b[0]!==255||b[1]!==216||b[2]!==255||b[b.length-2]!==255||b[b.length-1]!==217)throw Error('仅支持JPEG图片');
   return b;
 }
-function shareCreate(p){
+function shareCreate(p,user){
   if(!p||typeof p.text!=='string'||p.text.length>2000||!Array.isArray(p.images)||p.images.length>9)throw Error('文字最多2000字，图片最多9张');
   const text=p.text.trim(),images=p.images.map(shareImage);
   if(!text&&!images.length)throw Error('请输入文字或添加图片');
@@ -405,13 +434,13 @@ function shareCreate(p){
   const temp=fs.mkdtempSync(path.join(SHARE_DIR,'.pending-'));
   try{
     for(let i=0;i<images.length;i++)fs.writeFileSync(path.join(temp,i+'.jpg'),images[i],{mode:0o600,flag:'wx'});
-    fs.writeFileSync(path.join(temp,'meta.json'),JSON.stringify({createdAt,text,count:images.length}),{mode:0o600,flag:'wx'});
+    fs.writeFileSync(path.join(temp,'meta.json'),JSON.stringify({createdAt,text,count:images.length,owner:user.username,nickname:user.nickname}),{mode:0o600,flag:'wx'});
     fs.renameSync(temp,path.join(SHARE_DIR,id));
   }catch(e){try{fs.rmSync(temp,{recursive:true,force:true})}catch{}throw e;}
-  return shareMeta(id);
+  return shareMeta(id,user);
 }
 function shareRoute(req,res,url){
-  const p=url.pathname;
+  const p=url.pathname,user=currentUser(req);
   if(!p.startsWith('/api/share/'))return false;
   const fail=(status,error)=>reply(res,status,{error});
   try{
@@ -419,7 +448,7 @@ function shareRoute(req,res,url){
       const before=url.searchParams.get('before');
       if(before&&!SHARE_ID.test(before)){fail(400,'无效分页');return true;}
       const ids=shareIds().filter(id=>!before||id<before),batch=ids.slice(0,15);
-      reply(res,200,{posts:batch.map(shareMeta),next:ids.length>15?batch.at(-1):null});return true;
+      reply(res,200,{posts:batch.map(id=>shareMeta(id,user)),next:ids.length>15?batch.at(-1):null});return true;
     }
     const im=/^\/api\/share\/image\/([0-9]{13}-[a-f0-9]{24})\/([0-8])$/.exec(p);
     if(req.method==='GET'&&im){
@@ -432,6 +461,8 @@ function shareRoute(req,res,url){
     if(req.method==='DELETE'&&del){
       const dir=path.join(SHARE_DIR,del[1]);
       if(!fs.existsSync(dir)){fail(404,'记录不存在');return true;}
+      const meta=JSON.parse(fs.readFileSync(path.join(dir,'meta.json'),'utf8'));
+      if(!user||meta.owner!==user.username){fail(403,'只能删除自己发表的动态');return true;}
       fs.rmSync(dir,{recursive:true,force:false});reply(res,200,{ok:true});return true;
     }
     if(req.method!=='POST'||p!=='/api/share/posts'){fail(404,'接口不存在');return true;}
@@ -446,10 +477,10 @@ function shareRoute(req,res,url){
     req.on('data',chunk=>{if(finished)return;size+=chunk.length;if(size>SHARE_BODY){finish();parts=[];fail(413,'图片总大小超过限制');req.resume();return;}parts.push(chunk)});
     req.on('end',()=>{
       if(!finish())return;
-      const code=readAccessCode(),token=sessionToken(req),sess=token&&sessions.get(token);
-      if(!code||!sess||sess.until<=Date.now()||sess.fingerprint!==digest(code).toString('hex')){fail(401,'登录已过期，请重新登录');return;}
+      const author=currentUser(req);
+      if(!author){fail(401,'登录已过期，请重新登录');return;}
       let payload;try{payload=JSON.parse(Buffer.concat(parts).toString('utf8'))}catch{fail(400,'无效内容');return;}
-      try{reply(res,201,{post:shareCreate(payload)})}catch(e){if(e.code){log('SHARE_WRITE_ERROR '+String(e.code));fail(500,'保存失败，请检查服务器存储')}else fail(400,String(e.message).slice(0,120))}
+      try{reply(res,201,{post:shareCreate(payload,author)})}catch(e){if(e.code){log('SHARE_WRITE_ERROR '+String(e.code));fail(500,'保存失败，请检查服务器存储')}else fail(400,String(e.message).slice(0,120))}
     });
     return true;
   }catch(e){log('SHARE_ERROR '+String(e.code||'internal'));fail(500,'分享圈读取或操作失败');return true;}
@@ -459,6 +490,7 @@ const server=http.createServer((req,res)=>{
   let url;try{url=new URL(req.url,'http://localhost')}catch{return reply(res,400,{error:'无效请求'})}
   if(!accessGate(req,res,url))return;
   if(shareRoute(req,res,url))return;
+  if(req.method==='GET'&&url.pathname==='/api/account/me')return reply(res,200,currentUser(req));
   if(req.method!=='GET')return reply(res,405,{error:'只允许GET；无交易/下单API'});
   if(url.pathname==='/api/ui-error'){log('PRO_FRONTEND_ERROR '+(url.searchParams.get('message')||'unknown').slice(0,200));return reply(res,200,{ok:true})}
   if(url.pathname==='/api/pro2/snapshot')return reply(res,200,pro2.snapshot(pro2Trades));
@@ -489,6 +521,10 @@ const server=http.createServer((req,res)=>{
   if(!filepath.startsWith(PUBLIC+path.sep))return reply(res,403,{error:'禁止访问'});
   fs.readFile(filepath,(e,data)=>{
     if(e)return reply(res,404,{error:'Not Found'});
+    if(filepath===path.join(PUBLIC,'index.html')){
+      const user=currentUser(req);if(!user)return loginPage(res);
+      return reply(res,200,data.toString('utf8').replace('data-pro-account=""','data-pro-account="'+user.username+'"'),MIME['.html']);
+    }
     reply(res,200,data,MIME[path.extname(filepath)]||'application/octet-stream');
   });
 });
