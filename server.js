@@ -394,7 +394,9 @@ function accessGate(req,res,url){
           const candidate=await passwordHash(password,account?.salt||'00000000000000000000000000000000');
           if(!account||!crypto.timingSafeEqual(candidate,Buffer.from(account.hash,'hex'))){reject('账号或密码错误。',401);return}
         }
-        if(!res.destroyed)startSession(req,res,account);
+        const latest=readAccount(name);
+        if(!latest||latest.hash!==account.hash){reject('账号状态已改变，请重新登录。',409);return}
+        if(!res.destroyed)startSession(req,res,latest);
       }catch(e){log('ACCOUNT_ERROR '+String(e.code||'internal'));if(!res.destroyed)loginPage(res,'账号操作失败，请稍后重试。',500,register)}
       finally{release()}
     });return false;
@@ -417,7 +419,8 @@ function shareIds(){
 }
 function shareMeta(id,user){
   const m=JSON.parse(fs.readFileSync(path.join(SHARE_DIR,id,'meta.json'),'utf8'));
-  return {id,createdAt:m.createdAt,text:m.text,author:m.nickname||'历史动态',canDelete:!!(m.owner&&user&&m.owner===user.username),images:Array.from({length:m.count},(_,i)=>'/api/share/image/'+id+'/'+i)};
+  const author=m.owner?readAccount(m.owner):null;
+  return {id,createdAt:m.createdAt,text:m.text,author:author?.nickname||m.nickname||'历史动态',avatar:author?.avatar?accountPublic(author).avatar:null,canDelete:!!(m.owner&&user&&m.owner===user.username),images:Array.from({length:m.count},(_,i)=>'/api/share/image/'+id+'/'+i)};
 }
 function shareImage(v){
   if(typeof v!=='string'||v.length>Math.ceil(SHARE_MAX/3)*4||!/^[A-Za-z0-9+/]+={0,2}$/.test(v))throw Error('图片格式或大小不符合要求');
@@ -486,11 +489,88 @@ function shareRoute(req,res,url){
   }catch(e){log('SHARE_ERROR '+String(e.code||'internal'));fail(500,'分享圈读取或操作失败');return true;}
 }
 
+
+// Profile settings are authenticated and stored atomically beside the account.
+function accountPublic(account){
+  return {username:account.username,nickname:account.nickname,avatar:account.avatar?'/api/account/avatar/'+account.username+'?v='+Number(account.avatarAt||0):null};
+}
+function replaceAccount(account){
+  const temp=path.join(ACCOUNTS,'.edit-'+crypto.randomBytes(16).toString('hex'));
+  try{fs.writeFileSync(temp,JSON.stringify(account),{mode:0o600,flag:'wx'});fs.renameSync(temp,path.join(ACCOUNTS,account.username+'.json'))}
+  finally{try{fs.unlinkSync(temp)}catch{}}
+}
+let profilePending=0,profileFailures=new Map();
+function accountRoute(req,res,url){
+  const p=url.pathname;
+  if(!p.startsWith('/api/account/'))return false;
+  const user=currentUser(req),fail=(status,error)=>reply(res,status,{error});
+  if(!user){fail(401,'请先登录');return true}
+  try{
+    const account=readAccount(user.username);
+    if(!account){fail(401,'账号不存在');return true}
+    if(req.method==='GET'&&p==='/api/account/me'){reply(res,200,accountPublic(account));return true}
+    const match=/^\/api\/account\/avatar\/([a-z0-9_]{3,24})$/.exec(p);
+    if(req.method==='GET'&&match){
+      const other=match[1]===user.username?account:readAccount(match[1]);
+      if(!other?.avatar){fail(404,'尚未设置头像');return true}
+      reply(res,200,Buffer.from(other.avatar,'base64'),'image/jpeg');return true;
+    }
+    if(req.method!=='POST'||!['/api/account/profile','/api/account/password'].includes(p)){fail(404,'接口不存在');return true}
+    if(req.headers['x-pro-account']!=='1'||req.headers['sec-fetch-site']==='cross-site'){fail(403,'无效操作');req.resume();return true}
+    if(!/^application\/json(?:;|$)/i.test(req.headers['content-type']||'')){fail(415,'仅支持JSON');req.resume();return true}
+    const limit=p.endsWith('/password')?4096:650*1024;
+    if(Number(req.headers['content-length'])>limit){fail(413,'内容超过限制');req.resume();return true}
+    if(profilePending>=3){fail(429,'请求过多，请稍后重试');req.resume();return true}
+    profilePending++;
+    let chunks=[],size=0,done=false,released=false;
+    const release=()=>{if(!released){released=true;profilePending--}};
+    const abort=()=>{if(!done){done=true;release()}};
+    req.setTimeout(15000,()=>{abort();req.destroy()});req.on('aborted',abort);req.on('error',abort);req.on('close',abort);
+    req.on('data',b=>{if(done)return;size+=b.length;if(size>limit){abort();chunks=[];fail(413,'内容超过限制');req.resume();return}chunks.push(b)});
+    req.on('end',async()=>{
+      if(done)return;done=true;
+      try{
+        if(currentUser(req)?.username!==user.username){fail(401,'登录已过期');return}
+        let body;try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'))}catch{fail(400,'无效内容');return}
+        if(!body||typeof body!=='object'||Array.isArray(body)){fail(400,'无效内容');return}
+        const fresh=readAccount(user.username);
+        if(!fresh){fail(401,'账号不存在');return}
+        if(p.endsWith('/profile')){
+          const nickname=typeof body.nickname==='string'?body.nickname.trim():'';
+          if(!nickname||nickname.length>24||/[\x00-\x1f\x7f]/.test(nickname)){fail(400,'昵称需为1–24个有效字符');return}
+          if(Object.hasOwn(body,'avatar')){
+            if(body.avatar===null){delete fresh.avatar;delete fresh.avatarAt}
+            else{try{shareImage(body.avatar)}catch(e){fail(400,e.message);return}fresh.avatar=body.avatar;fresh.avatarAt=Date.now()}
+          }
+          fresh.nickname=nickname;replaceAccount(fresh);
+          for(const sess of sessions.values())if(sess.user?.username===fresh.username)sess.user.nickname=nickname;
+          reply(res,200,accountPublic(fresh));return;
+        }
+        const {oldPassword,newPassword,confirm}=body;
+        if(typeof oldPassword!=='string'||typeof newPassword!=='string'||Buffer.byteLength(oldPassword)>128||Buffer.byteLength(newPassword)>128||newPassword.length<10||newPassword!==confirm||oldPassword===newPassword){fail(400,'新密码至少10位，两次输入一致，且不同于旧密码');return}
+        const now=Date.now(),attempts=(profileFailures.get(user.username)||[]).filter(t=>t>now-5*60*1000);
+        if(attempts.length>=5){fail(429,'旧密码尝试过多，五分钟后再试');return}
+        attempts.push(now);profileFailures.set(user.username,attempts);
+        const candidate=await passwordHash(oldPassword,fresh.salt);
+        if(!crypto.timingSafeEqual(candidate,Buffer.from(fresh.hash,'hex'))){fail(403,'旧密码错误');return}
+        const salt=crypto.randomBytes(16).toString('hex'),hash=(await passwordHash(newPassword,salt)).toString('hex');
+        const latest=readAccount(user.username);
+        if(!latest||latest.hash!==fresh.hash||currentUser(req)?.username!==user.username){fail(409,'账号状态已改变，请重新登录');return}
+        latest.salt=salt;latest.hash=hash;replaceAccount(latest);
+        profileFailures.delete(user.username);
+        for(const [token,sess] of sessions)if(sess.user?.username===user.username)sessions.delete(token);
+        reply(res,200,{ok:true,relogin:true});
+      }catch(e){log('PROFILE_ERROR '+String(e.code||'internal'));if(!res.destroyed)fail(500,'账号设置保存失败')}
+      finally{release()}
+    });return true;
+  }catch(e){log('PROFILE_ERROR '+String(e.code||'internal'));fail(500,'账号设置读取失败');return true}
+}
+
 const server=http.createServer((req,res)=>{
   let url;try{url=new URL(req.url,'http://localhost')}catch{return reply(res,400,{error:'无效请求'})}
   if(!accessGate(req,res,url))return;
   if(shareRoute(req,res,url))return;
-  if(req.method==='GET'&&url.pathname==='/api/account/me')return reply(res,200,currentUser(req));
+  if(accountRoute(req,res,url))return;
   if(req.method!=='GET')return reply(res,405,{error:'只允许GET；无交易/下单API'});
   if(url.pathname==='/api/ui-error'){log('PRO_FRONTEND_ERROR '+(url.searchParams.get('message')||'unknown').slice(0,200));return reply(res,200,{ok:true})}
   if(url.pathname==='/api/pro2/snapshot')return reply(res,200,pro2.snapshot(pro2Trades));
