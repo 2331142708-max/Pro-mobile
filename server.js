@@ -377,9 +377,88 @@ function accessGate(req,res,url){
   reply(res,401,{error:'请先登录'});return false;
 }
 
+
+const SHARE_DIR=path.join(dataPath,'share-circle-v1');
+const SHARE_ID=/^[0-9]{13}-[a-f0-9]{24}$/;
+const SHARE_MAX=450*1024, SHARE_BODY=6*1024*1024;
+let sharePending=0;
+function shareIds(){
+  fs.mkdirSync(SHARE_DIR,{recursive:true,mode:0o700});
+  return fs.readdirSync(SHARE_DIR,{withFileTypes:true}).filter(e=>e.isDirectory()&&SHARE_ID.test(e.name)).map(e=>e.name).sort().reverse();
+}
+function shareMeta(id){
+  const m=JSON.parse(fs.readFileSync(path.join(SHARE_DIR,id,'meta.json'),'utf8'));
+  return {id,createdAt:m.createdAt,text:m.text,images:Array.from({length:m.count},(_,i)=>'/api/share/image/'+id+'/'+i)};
+}
+function shareImage(v){
+  if(typeof v!=='string'||v.length>Math.ceil(SHARE_MAX/3)*4||!/^[A-Za-z0-9+/]+={0,2}$/.test(v))throw Error('图片格式或大小不符合要求');
+  const b=Buffer.from(v,'base64');
+  if(b.length<4||b.length>SHARE_MAX||b.toString('base64')!==v||b[0]!==255||b[1]!==216||b[2]!==255||b[b.length-2]!==255||b[b.length-1]!==217)throw Error('仅支持JPEG图片');
+  return b;
+}
+function shareCreate(p){
+  if(!p||typeof p.text!=='string'||p.text.length>2000||!Array.isArray(p.images)||p.images.length>9)throw Error('文字最多2000字，图片最多9张');
+  const text=p.text.trim(),images=p.images.map(shareImage);
+  if(!text&&!images.length)throw Error('请输入文字或添加图片');
+  if(shareIds().length>=200)throw Error('已达200条上限，请删除旧记录');
+  const createdAt=Date.now(),id=String(createdAt)+'-'+crypto.randomBytes(12).toString('hex');
+  const temp=fs.mkdtempSync(path.join(SHARE_DIR,'.pending-'));
+  try{
+    for(let i=0;i<images.length;i++)fs.writeFileSync(path.join(temp,i+'.jpg'),images[i],{mode:0o600,flag:'wx'});
+    fs.writeFileSync(path.join(temp,'meta.json'),JSON.stringify({createdAt,text,count:images.length}),{mode:0o600,flag:'wx'});
+    fs.renameSync(temp,path.join(SHARE_DIR,id));
+  }catch(e){try{fs.rmSync(temp,{recursive:true,force:true})}catch{}throw e;}
+  return shareMeta(id);
+}
+function shareRoute(req,res,url){
+  const p=url.pathname;
+  if(!p.startsWith('/api/share/'))return false;
+  const fail=(status,error)=>reply(res,status,{error});
+  try{
+    if(req.method==='GET'&&p==='/api/share/posts'){
+      const before=url.searchParams.get('before');
+      if(before&&!SHARE_ID.test(before)){fail(400,'无效分页');return true;}
+      const ids=shareIds().filter(id=>!before||id<before),batch=ids.slice(0,15);
+      reply(res,200,{posts:batch.map(shareMeta),next:ids.length>15?batch.at(-1):null});return true;
+    }
+    const im=/^\/api\/share\/image\/([0-9]{13}-[a-f0-9]{24})\/([0-8])$/.exec(p);
+    if(req.method==='GET'&&im){
+      try{reply(res,200,fs.readFileSync(path.join(SHARE_DIR,im[1],im[2]+'.jpg')),'image/jpeg')}catch{fail(404,'图片不存在')}
+      return true;
+    }
+    if(req.method!=='POST'&&req.method!=='DELETE'){fail(405,'不支持的操作');return true;}
+    if(req.headers['x-pro-share']!=='1'){fail(403,'无效操作');req.resume();return true;}
+    const del=/^\/api\/share\/posts\/([0-9]{13}-[a-f0-9]{24})$/.exec(p);
+    if(req.method==='DELETE'&&del){
+      const dir=path.join(SHARE_DIR,del[1]);
+      if(!fs.existsSync(dir)){fail(404,'记录不存在');return true;}
+      fs.rmSync(dir,{recursive:true,force:false});reply(res,200,{ok:true});return true;
+    }
+    if(req.method!=='POST'||p!=='/api/share/posts'){fail(404,'接口不存在');return true;}
+    if(!/^application\/json(?:;|$)/i.test(req.headers['content-type']||'')){fail(415,'仅支持JSON');req.resume();return true;}
+    if(Number(req.headers['content-length'])>SHARE_BODY){fail(413,'图片总大小超过限制');req.resume();return true;}
+    if(sharePending>=2){fail(429,'正在处理其他发表，请稍后再试');req.resume();return true;}
+    sharePending++;
+    let parts=[],size=0,finished=false;
+    const finish=()=>{if(finished)return false;finished=true;sharePending--;return true;};
+    req.setTimeout(30000,()=>{finish();req.destroy()});
+    req.on('aborted',finish);req.on('error',finish);req.on('close',finish);
+    req.on('data',chunk=>{if(finished)return;size+=chunk.length;if(size>SHARE_BODY){finish();parts=[];fail(413,'图片总大小超过限制');req.resume();return;}parts.push(chunk)});
+    req.on('end',()=>{
+      if(!finish())return;
+      const code=readAccessCode(),token=sessionToken(req),sess=token&&sessions.get(token);
+      if(!code||!sess||sess.until<=Date.now()||sess.fingerprint!==digest(code).toString('hex')){fail(401,'登录已过期，请重新登录');return;}
+      let payload;try{payload=JSON.parse(Buffer.concat(parts).toString('utf8'))}catch{fail(400,'无效内容');return;}
+      try{reply(res,201,{post:shareCreate(payload)})}catch(e){if(e.code){log('SHARE_WRITE_ERROR '+String(e.code));fail(500,'保存失败，请检查服务器存储')}else fail(400,String(e.message).slice(0,120))}
+    });
+    return true;
+  }catch(e){log('SHARE_ERROR '+String(e.code||'internal'));fail(500,'分享圈读取或操作失败');return true;}
+}
+
 const server=http.createServer((req,res)=>{
   let url;try{url=new URL(req.url,'http://localhost')}catch{return reply(res,400,{error:'无效请求'})}
   if(!accessGate(req,res,url))return;
+  if(shareRoute(req,res,url))return;
   if(req.method!=='GET')return reply(res,405,{error:'只允许GET；无交易/下单API'});
   if(url.pathname==='/api/ui-error'){log('PRO_FRONTEND_ERROR '+(url.searchParams.get('message')||'unknown').slice(0,200));return reply(res,200,{ok:true})}
   if(url.pathname==='/api/pro2/snapshot')return reply(res,200,pro2.snapshot(pro2Trades));
