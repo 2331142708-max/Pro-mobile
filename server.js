@@ -749,6 +749,132 @@ function moderationRoute(req,res,url){
   });return true;
 }
 
+
+// Clearly labeled virtual practice ledger. No payment, withdrawal, exchange
+// credentials, real orders, leverage, or monetary entitlement.
+const SIM_DIR=path.join(dataPath,'practice-points-v1');
+const SIM_AMOUNTS=[100,500,1000,5000];
+const SIM_CAP=100000;
+let simPending=0;
+function simFile(name){if(!USER_RE.test(name))throw Error('Invalid account');return path.join(SIM_DIR,name+'.json')}
+function simGet(name){
+  try{return JSON.parse(fs.readFileSync(simFile(name),'utf8'))}
+  catch(e){if(e.code==='ENOENT')return {balance:0,positions:{},requests:[],trades:[]};throw e}
+}
+function simSave(name,v){
+  fs.mkdirSync(SIM_DIR,{recursive:true,mode:0o700});
+  const tmp=path.join(SIM_DIR,'.tmp-'+crypto.randomBytes(12).toString('hex'));
+  try{fs.writeFileSync(tmp,JSON.stringify(v),{flag:'wx',mode:0o600});fs.renameSync(tmp,simFile(name))}
+  finally{try{fs.unlinkSync(tmp)}catch{}}
+}
+function simQuote(symbol,now=Date.now()){
+  const m=MARKETS.get(symbol);
+  if(!allowedSymbol(symbol)||!m)return null;
+  const price=Number(m.price),at=Number(m.priceAt);
+  return {symbol,price:Number.isFinite(price)&&price>0?price:null,at:Number.isFinite(at)?at:0,
+    fresh:Number.isFinite(price)&&price>0&&Number.isFinite(at)&&at>0&&Math.abs(now-at)<45000,
+    change:Number.isFinite(m.change24h)?m.change24h:null};
+}
+function simRequests(){
+  let files=[];try{files=fs.readdirSync(SIM_DIR)}catch(e){if(e.code!=='ENOENT')throw e}
+  const out=[];
+  for(const file of files){
+    if(!/^[a-z0-9_]{3,24}\.json$/.test(file))continue;
+    const name=file.slice(0,-5),v=simGet(name);
+    for(const r of v.requests)if(r.status==='pending')out.push({...r,username:name});
+  }
+  return out.sort((a,b)=>a.at-b.at);
+}
+function simView(name){
+  const v=simGet(name),quotes=FIVE_SYMBOLS.map(symbol=>simQuote(symbol)||{symbol,price:null,at:0,fresh:false,change:null});
+  return {unit:'虚拟练习点',balance:v.balance,positions:v.positions,requests:v.requests.slice(-50).reverse(),trades:v.trades.slice(-50).reverse(),quotes,serverTime:Date.now()};
+}
+function simOperation(user,op,body){
+  const fail=(status,error)=>({status,data:{error}}),ok=data=>({status:200,data});
+  if(!body||typeof body!=='object'||Array.isArray(body))return fail(400,'无效请求');
+  const name=user.username;
+  if(op==='review'){
+    if(!isAdmin(user))return fail(403,'需要管理员权限');
+    const target=body.username,id=body.id;
+    if(typeof target!=='string'||!USER_RE.test(target)||typeof id!=='string'||!/^[a-f0-9]{24}$/.test(id)||!['approve','reject'].includes(body.decision))return fail(400,'无效审核操作');
+    if(!readAccount(target))return fail(404,'账号不存在');
+    const v=simGet(target),r=v.requests.find(x=>x.id===id);
+    if(!r)return fail(404,'申请不存在');
+    if(r.status!=='pending')return fail(409,'申请已处理，请刷新');
+    if(body.decision==='approve'&&v.balance+r.amount>SIM_CAP)return fail(409,'虚拟余额将超过上限，请拒绝或稍后审核');
+    if(body.decision==='approve')v.balance+=r.amount;
+    r.status=body.decision==='approve'?'approved':'rejected';r.reviewedAt=Date.now();r.reviewer=name;
+    simSave(target,v);log('PRACTICE_REVIEW '+JSON.stringify({actor:name,target,id,decision:body.decision,amount:r.amount,at:r.reviewedAt}));
+    return ok({ok:true});
+  }
+  const v=simGet(name);
+  if(op==='request'){
+    if(!SIM_AMOUNTS.includes(body.amount))return fail(400,'请选择预设虚拟额度');
+    if(v.requests.some(r=>r.status==='pending'))return fail(409,'已有待审核申请');
+    if(v.requests.length>=200)return fail(409,'申请记录已达上限');
+    if(v.balance+body.amount>SIM_CAP)return fail(409,'虚拟余额将超过上限');
+    const r={id:crypto.randomBytes(12).toString('hex'),amount:body.amount,status:'pending',at:Date.now()};
+    v.requests.push(r);simSave(name,v);return ok({request:r});
+  }
+  if(op!=='practice')return fail(404,'接口不存在');
+  const {symbol,side,clientId}=body;
+  if(typeof clientId!=='string'||!/^[a-zA-Z0-9_-]{12,80}$/.test(clientId))return fail(400,'无效练习标识');
+  const previous=v.trades.find(x=>x.clientId===clientId);
+  if(previous)return ok({trade:previous});
+  if(v.trades.length>=500)return fail(409,'练习记录已达500条上限');
+  if(!allowedSymbol(symbol)||!['buy','sell'].includes(side))return fail(400,'无效合约或操作');
+  const quote=simQuote(symbol);if(!quote?.fresh)return fail(409,'报价过期，暂停模拟操作');
+  const price=quote.price,old=v.positions[symbol]||{qty:0,cost:0};
+  let amount,qty;
+  if(side==='buy'){
+    amount=body.amount;
+    if(!Number.isInteger(amount)||amount<1||amount>1000||amount>v.balance)return fail(400,'请输入1–1000练习点，且不得超过余额');
+    qty=amount/price;
+    v.balance-=amount;v.positions[symbol]={qty:old.qty+qty,cost:old.cost+amount};
+  }else{
+    if(!(old.qty>0))return fail(400,'没有该合约的模拟持有记录');
+    qty=old.qty;amount=Math.floor(qty*price*100)/100;
+    if(!Number.isFinite(amount)||amount<0||v.balance+amount>SIM_CAP)return fail(409,'模拟结算超过余额上限');
+    v.balance=Math.round((v.balance+amount)*100)/100;delete v.positions[symbol];
+  }
+  const trade={id:crypto.randomBytes(12).toString('hex'),clientId,symbol,side,price,qty,amount,at:Date.now(),quoteAt:quote.at};
+  v.trades.push(trade);simSave(name,v);return ok({trade});
+}
+function simRoute(req,res,url){
+  if(!url.pathname.startsWith('/api/practice/'))return false;
+  const user=currentUser(req),p=url.pathname.slice('/api/practice/'.length),fail=(status,error)=>reply(res,status,{error});
+  if(!user){fail(401,'请先登录');return true}
+  try{
+    if(req.method==='GET'&&p==='state'){reply(res,200,simView(user.username));return true}
+    if(req.method==='GET'&&p==='chart'){
+      const symbol=url.searchParams.get('symbol')||'';
+      if(!allowedSymbol(symbol)){fail(400,'无效合约');return true}
+      const m=MARKETS.get(symbol);
+      const rows=(m?.pro2?.rows||[]).slice(-40).map(b=>({o:b.o,h:b.h,l:b.l,c:b.c})).filter(b=>[b.o,b.h,b.l,b.c].every(x=>Number.isFinite(x)&&x>0));
+      reply(res,200,{symbol,interval:'2H',rows});return true;
+    }
+    if(req.method==='GET'&&p==='review'){
+      if(!isAdmin(user)){fail(403,'需要管理员权限');return true}
+      reply(res,200,{pending:simRequests()});return true;
+    }
+    if(req.method!=='POST'||!['request','review','practice'].includes(p)){fail(404,'接口不存在');return true}
+    if(req.headers['x-pro-practice']!=='1'||req.headers['sec-fetch-site']==='cross-site'||!/^application\/json(?:;|$)/i.test(req.headers['content-type']||'')){fail(403,'无效请求');req.resume();return true}
+    if(Number(req.headers['content-length'])>4096||simPending>=6){fail(429,'请求过多或过大');req.resume();return true}
+    simPending++;let chunks=[],size=0,done=false;
+    const finish=()=>{if(done)return false;done=true;simPending--;return true};
+    req.setTimeout(10000,()=>{finish();req.destroy()});req.on('aborted',finish);req.on('error',finish);req.on('close',finish);
+    req.on('data',b=>{if(done)return;size+=b.length;if(size>4096){finish();chunks=[];fail(413,'请求过大');req.resume();return}chunks.push(b)});
+    req.on('end',()=>{
+      if(!finish())return;
+      try{
+        const actor=currentUser(req);if(actor?.username!==user.username){fail(401,'登录已过期');return}
+        let body;try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'))}catch{fail(400,'无效内容');return}
+        const r=simOperation(actor,p,body);reply(res,r.status,r.data);
+      }catch(e){log('PRACTICE_ERROR '+String(e.code||'internal'));fail(500,'模拟记录保存失败')}
+    });return true;
+  }catch(e){log('PRACTICE_ERROR '+String(e.code||'internal'));fail(500,'模拟数据读取失败');return true}
+}
+
 const server=http.createServer((req,res)=>{
   let url;try{url=new URL(req.url,'http://localhost')}catch{return reply(res,400,{error:'无效请求'})}
   if(!accessGate(req,res,url))return;
@@ -756,6 +882,7 @@ const server=http.createServer((req,res)=>{
   if(accountRoute(req,res,url))return;
   if(chatRoute(req,res,url))return;
   if(moderationRoute(req,res,url))return;
+  if(simRoute(req,res,url))return;
   if(req.method!=='GET')return reply(res,405,{error:'只允许GET；无交易/下单API'});
   if(url.pathname==='/api/ui-error'){log('PRO_FRONTEND_ERROR '+(url.searchParams.get('message')||'unknown').slice(0,200));return reply(res,200,{ok:true})}
   if(url.pathname==='/api/pro2/snapshot')return reply(res,200,pro2.snapshot(pro2Trades));
