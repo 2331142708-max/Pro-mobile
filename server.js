@@ -595,7 +595,7 @@ function chatList(name){
     const [a,b]=file.split('.'),peer=a===name?b:a,v=chatGet(name,peer),acc=readAccount(peer);
     if(!v||!acc||!v.users.includes(name))continue;
     const last=v.messages.at(-1),read=v.read[name]||0;
-    result.push({peer:accountPublic(acc),state:v.state,incoming:v.state==='pending'&&v.requester!==name,last:last?{text:last.text,at:last.at,from:last.from}:null,unread:v.state==='accepted'?v.messages.filter(m=>m.from!==name&&m.id>read).length:0,updatedAt:v.updatedAt});
+    result.push({peer:accountPublic(acc),state:v.state,incoming:v.state==='pending'&&v.requester!==name,last:last?{text:last.text,at:last.at,from:last.from}:null,unread:v.state==='accepted'?v.messages.filter(m=>m.from!==name&&m.id>read).length:0,lastIncoming:v.state==='accepted'?(v.messages.filter(m=>m.from!==name).at(-1)?.id||0):0,updatedAt:v.updatedAt});
   }
   result.sort((a,b)=>Number(b.incoming)-Number(a.incoming)||b.updatedAt-a.updatedAt);
   return {items:result,unread:result.reduce((n,v)=>n+v.unread+(v.incoming?1:0),0)};
