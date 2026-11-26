@@ -485,6 +485,15 @@
     return '<section class="swing-card"><h3>模拟止盈止损 · 历史复核</h3><p><b>'+esc(state)+'</b></p>'+(guard?'<p>四账本累计理论净盈亏 '+signed(guard.net)+' · 模拟停止上限 '+esc(guard.limit)+' U</p>':'')+(rows?rows:'<p>暂无完整阈值触及记录</p>')+'<p>仅显示已经结束的研究记录，不生成当前进场、止盈或止损指令。理论结果未计实际费用、滑点及强平。</p></section>';
   }
 
+
+  function swingHistoricalPrices(v){
+    const d=v.closedLab,history=Array.isArray(d?.history)?d.history:[];
+    const last=history.find(x=>Number.isFinite(x.entry)&&x.entry>0&&Number.isFinite(x.exit)&&x.exit>0&&['tp','sl'].includes(x.reason));
+    const stamp=t=>Number.isFinite(t)&&t>0?new Date(t).toLocaleString('zh-CN',{hour12:false}):'—';
+    const cell=(label,value)=>'<div><small>'+label+'</small><strong>'+ (Number.isFinite(value)&&value>0?price(value):'—')+'</strong></div>';
+    return '<section class="swing-card swing-history-prices"><div class="swing-stage-caption">已结束模拟 · 非当前下单价格</div><div class="swing-history-price-grid">'+cell('模拟参考价',last?.entry)+cell('止盈复核价',last?.reason==='tp'?last.exit:null)+cell('止损复核价',last?.reason==='sl'?last.exit:null)+'</div><p>'+ (last?esc(last.label)+' · '+stamp(last.exitAt)+' 已结束 · '+(last.reason==='tp'?'仅触及正向阈值':'仅触及反向阈值'):v.symbol!=='BTCUSDT'?'此合约暂无对应模拟记录':'暂无完整历史阈值记录')+'</p></section>';
+  }
+
   function swingRender(v){
     const body=$('swingBody'),scroll=body.scrollTop,expanded=new Set([...body.querySelectorAll('details[open][data-swing-fold]')].map(x=>x.dataset.swingFold));
     const phase=v.ready?v.phase:null,code=phase?.code||'waiting';
@@ -503,7 +512,7 @@
       return '<tr><td>'+minutes+'分钟</td><td>'+ (v.ready&&r?.ready?swingPct(r.change):'—')+'</td><td>'+(v.ready&&r?.ready?swingPct(r.rebound):'—')+'</td><td>'+(v.ready&&r?.ready?swingPct(r.pullback):'—')+'</td><td>'+(v.ready&&r?.ready&&r.buyPct!=null?swingNum(r.buyPct,1)+'%':'—')+'</td></tr>';
     }).join('');
     const blocks=v.ready&&v.blocks?.length?v.blocks.map(x=>'<div class="swing-history-row"><span>'+tm(x.from)+'–'+tm(x.to)+'</span><b>'+swingPct(x.change)+' / '+swingPct(x.range)+'</b></div>').join(''):'<p>连续样本不足</p>';
-    body.innerHTML='<div class="swing-kicker">'+esc(v.symbol||store.symbol)+' · '+esc(v.exchangeLabel||'')+' · 只读研究</div><div class="swing-price" id="swingLivePrice">—</div><p id="swingQuoteStatus">等待独立公开报价</p>'  +riskCard+swingClosedLab(v)+swingHorizonAudit(v)+stage+'<details class="swing-card" data-swing-fold="old-follow"><summary><b>原60秒观察及五模型历史复核</b><span class="swing-fold-hint">详情 ›</span></summary>'+swingFollowCard(v)+swingStudies(v)+'</details>'+'<details class="swing-card" data-swing-fold="periods"><summary><b>1 / 3 / 5分钟实际变化</b><span class="swing-fold-hint">详情 ›</span></summary><div class="swing-table-scroll"><table class="swing-mini-table"><thead><tr><th>周期</th><th>涨跌</th><th>回升</th><th>回落</th><th>主动买</th></tr></thead><tbody>'+rows+'</tbody></table></div></details><details class="swing-card" data-swing-fold="history"><summary><b>历史5分钟区间复核</b><span class="swing-fold-hint">详情 ›</span></summary><p>已发生区间涨跌 / 振幅</p>'+blocks+'</details><p class="swing-compact-note">公开成交采样 · 与2H主模型独立。不生成未来方向、入场指令或盈利概率。</p>';
+    body.innerHTML='<div class="swing-kicker">'+esc(v.symbol||store.symbol)+' · '+esc(v.exchangeLabel||'')+' · 只读研究</div><div class="swing-price" id="swingLivePrice">—</div><p id="swingQuoteStatus">等待独立公开报价</p>'  +swingHistoricalPrices(v)+riskCard+swingClosedLab(v)+swingHorizonAudit(v)+stage+'<details class="swing-card" data-swing-fold="old-follow"><summary><b>原60秒观察及五模型历史复核</b><span class="swing-fold-hint">详情 ›</span></summary>'+swingFollowCard(v)+swingStudies(v)+'</details>'+'<details class="swing-card" data-swing-fold="periods"><summary><b>1 / 3 / 5分钟实际变化</b><span class="swing-fold-hint">详情 ›</span></summary><div class="swing-table-scroll"><table class="swing-mini-table"><thead><tr><th>周期</th><th>涨跌</th><th>回升</th><th>回落</th><th>主动买</th></tr></thead><tbody>'+rows+'</tbody></table></div></details><details class="swing-card" data-swing-fold="history"><summary><b>历史5分钟区间复核</b><span class="swing-fold-hint">详情 ›</span></summary><p>已发生区间涨跌 / 振幅</p>'+blocks+'</details><p class="swing-compact-note">公开成交采样 · 与2H主模型独立。不生成未来方向、入场指令或盈利概率。</p>';
     for(const x of body.querySelectorAll('details[data-swing-fold]'))x.open=expanded.has(x.dataset.swingFold);
     body.scrollTop=scroll;renderSwingQuote();
   }
