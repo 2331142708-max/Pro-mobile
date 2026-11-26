@@ -114,12 +114,142 @@ function openSignalLab({file,log=()=>{}}){
  try{return createLab({initial,save,error})}catch(e){log('SIGNAL_LAB '+e.message);return createLab({enabled:false,error:'已有记录不兼容，已暂停：'+e.message})}
 }
 
+
+// Forward-only, unleveraged event study. Descriptive rules are research
+// assumptions, not validated entries. No orders, money, or account balance.
+function createShortStudy({initial=null,save=()=>{},now=Date.now,enabled=true,error=''}={}){
+  const definitions={
+    exhaustion:{label:'动能衰竭反转',note:'比较连续价格变化、成交额和主动成交力量是否减弱'},
+    failed_break:{label:'假突破回归',note:'观察前区间被突破后是否实际返回区间'},
+    absorption:{label:'主动成交吸收',note:'观察主动成交偏向与实际价格位移是否背离；不推断隐藏挂单'},
+    ofi:{label:'订单流失衡（快照近似）',note:'买一卖一价格与数量变化、主动成交和价格变化；不等同全量挂撤单事件'},
+    vwap:{label:'VWAP均值回归',note:'真实成交额/成交数量计算滚动VWAP；按震荡或方向性样本分别统计'}
+  };
+  const codes=Object.keys(definitions),horizon=60000,maxGap=6000;
+  const stats=()=>({samples:0,aligned:0,opposite:0,flat:0,invalid:0,sum:0,absolute:0,byRegime:{},byDirection:{}});
+  const fresh=()=>({version:1,startedAt:now(),models:Object.fromEntries(codes.map(k=>[k,{stats:stats(),pending:null,lastEventAt:0}])),history:[]});
+  const state=initial||fresh();
+  if(state.version!==1||!Array.isArray(state.history)||codes.some(k=>!state.models?.[k]?.stats))throw Error('研究记录不兼容');
+  let alive=enabled&&!error,failure=error,latestAt=0,bookAt=0,lastTrade=null,previousBook=null;
+  const buckets=[],books=[],ready={};
+  function persist(){if(!alive)return;try{save(state)}catch(e){alive=false;failure='保存失败，研究暂停：'+String(e.message||e).slice(0,100)}}
+  function result(st,value){
+    st.samples++;st.sum+=value;st.absolute+=Math.abs(value);
+    if(value>.005)st.aligned++;else if(value<-.005)st.opposite++;else st.flat++;
+  }
+  function finalize(key,reason,at,price=null){
+    const m=state.models[key],p=m.pending;if(!p)return;
+    const value=reason==='complete'&&Number.isFinite(price)&&p.price>0?p.direction*100*(price/p.price-1):null;
+    if(value===null)m.stats.invalid++;
+    else{
+      result(m.stats,value);
+      const regime=m.stats.byRegime[p.regime]||(m.stats.byRegime[p.regime]=stats());result(regime,value);
+      const direction=p.direction>0?'回升':'回落',part=m.stats.byDirection[direction]||(m.stats.byDirection[direction]=stats());result(part,value);
+    }
+    state.history.unshift({code:key,label:definitions[key].label,direction:p.direction>0?'回升':'回落',regime:p.regime,startAt:p.at,endAt:at,reference:p.price,endPrice:price,change:value,reason});
+    state.history=state.history.slice(0,1000);m.pending=null;
+  }
+  if(alive){let changed=false;for(const key of codes)if(state.models[key].pending){finalize(key,'restart',now());changed=true}if(changed)persist()}
+  function onTrade(symbol,price,at,side,notional,t=now()){
+    if(!alive||symbol!=='BTCUSDT'||!Number.isFinite(price)||price<=0||!Number.isFinite(at)||t-at>maxGap||at>t+1000||!['buy','sell'].includes(side)||!Number.isFinite(notional)||notional<=0||at<latestAt)return;
+    const gap=latestAt&&at-latestAt>maxGap;
+    if(gap){buckets.length=0;for(const k of codes)ready[k]='成交断流，重新积累样本'}
+    let changed=false;
+    for(const k of codes){const p=state.models[k].pending;if(!p)continue;
+      if(gap||at-p.lastAt>maxGap){finalize(k,'gap',t);changed=true}
+      else if(at>=p.at+horizon){finalize(k,'complete',at,price);changed=true}
+      else p.lastAt=at;
+    }
+    latestAt=at;lastTrade={price,at};const sec=Math.floor(at/1000)*1000;
+    let b=buckets.at(-1);if(!b||b.t!==sec){b={t:sec,o:price,h:price,l:price,c:price,buy:0,sell:0,qty:0,notional:0};buckets.push(b)}
+    b.h=Math.max(b.h,price);b.l=Math.min(b.l,price);b.c=price;b[side]+=notional;b.qty+=notional/price;b.notional+=notional;
+    while(buckets.length&&buckets[0].t<sec-180000)buckets.shift();
+    if(changed)persist();
+  }
+  // Observed top-of-book changes from successive public snapshots; changes
+  // between snapshots are not observed and cancellation is not identifiable.
+  function onBook(bid,bidQty,ask,askQty,at,t=now()){
+    if(!alive||![bid,bidQty,ask,askQty,at].every(Number.isFinite)||!(bid>0&&ask>=bid&&bidQty>=0&&askQty>=0)||Math.abs(t-at)>15000||at<=bookAt)return;
+    const b={bid,bidQty,ask,askQty,at},p=previousBook;
+    if(p&&at-p.at<=12000){
+      const imbalance=(bid>=p.bid?bidQty:0)-(bid<=p.bid?p.bidQty:0)-(ask<=p.ask?askQty:0)+(ask>=p.ask?p.askQty:0);
+      const scale=bidQty+askQty+p.bidQty+p.askQty;
+      if(scale>0)books.push({at,value:imbalance/scale});
+    }else books.length=0;
+    previousBook=b;bookAt=at;while(books.length&&books[0].at<at-60000)books.shift();
+  }
+  function window(a){if(!a.length)return null;const buy=a.reduce((n,b)=>n+b.buy,0),sell=a.reduce((n,b)=>n+b.sell,0),volume=buy+sell;return {o:a[0].o,c:a.at(-1).c,h:Math.max(...a.map(b=>b.h)),l:Math.min(...a.map(b=>b.l)),volume,flow:volume?(buy-sell)/volume:0,qty:a.reduce((n,b)=>n+b.qty,0),notional:a.reduce((n,b)=>n+b.notional,0),n:a.length}}
+  const move=(a,b)=>100*(b/a-1);
+  function scan(t=now()){
+    if(!alive)return;
+    let changed=false;
+    for(const k of codes){const p=state.models[k].pending;if(p&&t-p.lastAt>maxGap){finalize(k,'gap',t);changed=true}}
+    const end=buckets.at(-1)?.t;
+    if(!lastTrade||t-latestAt>maxGap||!end||buckets[0].t>end-115000||buckets.some((b,i)=>i&&b.t-buckets[i-1].t>maxGap)){
+      for(const k of codes)ready[k]='等待连续约2分钟真实成交';
+      if(changed)persist();return;
+    }
+    // Use completed seconds only. Evaluate one event per model per
+    // 60-second observation window; the reference is a later actual print.
+    const closed=buckets.filter(b=>b.t<end),recent=window(closed.filter(b=>b.t>=end-15000)),
+      prior=window(closed.filter(b=>b.t>=end-45000&&b.t<end-15000)),
+      base=window(closed.filter(b=>b.t>=end-120000&&b.t<end-45000)),
+      full=window(closed.filter(b=>b.t>=end-120000));
+    if(!recent||!prior||!base||!full||recent.n<8||prior.n<16||base.n<40||!full.qty){
+      for(const k of codes)ready[k]='有效成交样本不足';if(changed)persist();return;
+    }
+    const displacement=move(full.o,full.c),range=move(full.l,full.h),
+      regime=range>0&&Math.abs(displacement)/range>=.65?'方向性':'震荡',
+      d0=move(prior.o,prior.c),d1=move(recent.o,recent.c),
+      candidates={exhaustion:0,failed_break:0,absorption:0,ofi:0,vwap:0};
+    if(Math.abs(d0)>.025&&d0*d1<0&&recent.volume/15<prior.volume/30&&Math.abs(recent.flow)<Math.abs(prior.flow))candidates.exhaustion=-Math.sign(d0);
+    if(prior.l<base.l&&recent.c>base.l&&recent.c<base.h)candidates.failed_break=1;
+    else if(prior.h>base.h&&recent.c<base.h&&recent.c>base.l)candidates.failed_break=-1;
+    if(Math.abs(recent.flow)>.35&&Math.abs(d1)<.015&&recent.volume/15>=prior.volume/30)candidates.absorption=-Math.sign(recent.flow);
+    const goodBooks=books.filter(b=>b.at>=t-30000);
+    if(goodBooks.length>=3&&t-bookAt<=10000){
+      const flow=goodBooks.reduce((n,b)=>n+b.value,0)/goodBooks.length;
+      if(Math.abs(flow)>.12&&flow*recent.flow>0&&flow*d1>0)candidates.ofi=Math.sign(flow);
+      ready.ofi='真实买一卖一连续快照（近似OFI）';
+    }else ready.ofi='等待连续盘口数量快照；不推断撤单';
+    const vw=full.notional/full.qty,dev=move(vw,prior.c),closer=Math.abs(move(vw,recent.c))<Math.abs(dev);
+    if(Math.abs(dev)>.025&&closer&&dev*d1<0)candidates.vwap=-Math.sign(dev);
+    for(const k of codes){
+      if(k!=='ofi')ready[k]='公开成交样本已就绪';
+      const m=state.models[k],direction=candidates[k];
+      // Count only a new occurrence, rather than resampling an unchanged condition.
+      const prev=m.lastCondition||0;m.lastCondition=direction;
+      if(!direction||direction===prev||m.pending||t-m.lastEventAt<horizon)continue;
+      m.lastEventAt=t;
+      m.pending={direction,regime,at:lastTrade.at,price:lastTrade.price,lastAt:lastTrade.at};
+      changed=true;
+    }
+    if(changed)persist();
+  }
+  function summarize(st){
+    return {samples:st.samples,aligned:st.aligned,opposite:st.opposite,flat:st.flat,invalid:st.invalid,mean:st.samples?st.sum/st.samples:null,alignment:st.samples?100*st.aligned/st.samples:null};
+  }
+  function snapshot(t=now()){
+    return {enabled:alive,error:failure,startedAt:state.startedAt,latestAt,bookAt,serverAt:t,horizonSeconds:horizon/1000,
+      models:codes.map(code=>{const m=state.models[code],st=m.stats;return {code,...definitions[code],status:ready[code]||'等待真实样本',...summarize(st),active:!!m.pending,
+        byRegime:Object.fromEntries(Object.entries(st.byRegime).map(([k,v])=>[k,summarize(v)])),byDirection:Object.fromEntries(Object.entries(st.byDirection).map(([k,v])=>[k,summarize(v)]))}}),history:state.history.slice(0,100)};
+  }
+  return {onTrade,onBook,scan,snapshot,flush:persist};
+}
+function openShortStudy(file){
+  let initial=null,error='';
+  try{if(fs.existsSync(file))initial=JSON.parse(fs.readFileSync(file,'utf8'))}catch(e){error='已有研究记录读取失败'}
+  const save=state=>{fs.mkdirSync(path.dirname(file),{recursive:true});const temp=file+'.tmp';fs.writeFileSync(temp,JSON.stringify(state),{mode:0o600});fs.renameSync(temp,file)};
+  try{return createShortStudy({initial,save,error})}catch(e){return createShortStudy({enabled:false,error:'已有研究记录格式不兼容'})}
+}
+
+const shortStudy=openShortStudy(path.join(dataPath,'btc-short-observation-v1.json'));
 const signalLab=openSignalLab({file:path.join(dataPath,'swing-signal-lab-btc-v1.json'),log});
-const pro2Trades=createPro2Trades({markets:MARKETS,log,stopped:()=>stop,onTrade:(symbol,price,at)=>{if(symbol==='BTCUSDT')signalLab.trade(symbol,price,at)}});
+const pro2Trades=createPro2Trades({markets:MARKETS,log,stopped:()=>stop,onTrade:(symbol,price,at,side,amount)=>{if(symbol==='BTCUSDT'){signalLab.trade(symbol,price,at);shortStudy.onTrade(symbol,price,at,side,amount)}}});
 let signalLabTimer=null;
 function scanSignalLab(){
   if(stop)return;
-  try{const now=Date.now();signalLab.sweep(now);if(MARKETS.has('BTCUSDT'))signalLab.scan('BTCUSDT',pro2Trades.getSwing('BTCUSDT'),now)}
+  try{const now=Date.now();signalLab.sweep(now);shortStudy.scan(now);if(MARKETS.has('BTCUSDT'))signalLab.scan('BTCUSDT',pro2Trades.getSwing('BTCUSDT'),now)}
   catch(e){log('SIGNAL_LAB_SCAN '+String(e.message||e).slice(0,120))}
 }
 
@@ -1052,6 +1182,17 @@ function classicLiveView(symbol,now=Date.now()){
     micro:cached.micro,largeTrades:cached.largeTrades,flowAt:cached.at,marketPulse:classicPulseCache.value};
 }
 
+
+let shortBookBusy=false,shortBookTimer=null;
+async function sampleStudyBook(){
+  if(stop||shortBookBusy||!MARKETS.has('BTCUSDT'))return;
+  shortBookBusy=true;
+  try{
+    const row=await json(BINANCE+'/fapi/v1/ticker/bookTicker?symbol=BTCUSDT',5000);
+    if(row.symbol==='BTCUSDT')shortStudy.onBook(Number(row.bidPrice),Number(row.bidQty),Number(row.askPrice),Number(row.askQty),Number(row.time));
+  }catch{}finally{shortBookBusy=false}
+}
+
 const server=http.createServer((req,res)=>{
   let url;try{url=new URL(req.url,'http://localhost')}catch{return reply(res,400,{error:'无效请求'})}
   if(!accessGate(req,res,url))return;
@@ -1062,7 +1203,7 @@ const server=http.createServer((req,res)=>{
   if(simRoute(req,res,url))return;
   if(req.method!=='GET')return reply(res,405,{error:'只允许GET；无交易/下单API'});
   if(url.pathname==='/api/ui-error'){log('PRO_FRONTEND_ERROR '+(url.searchParams.get('message')||'unknown').slice(0,200));return reply(res,200,{ok:true})}
-  if(url.pathname==='/api/pro2/signal-lab')return reply(res,200,signalLab.snapshot());
+  if(url.pathname==='/api/pro2/signal-lab')return reply(res,200,{...signalLab.snapshot(),shortStudy:shortStudy.snapshot()});
   if(url.pathname==='/api/pro2/snapshot')return reply(res,200,pro2.snapshot(pro2Trades));
   if(url.pathname==='/api/pro2/flow-health')return reply(res,200,pro2Trades.health());
   if(url.pathname==='/api/pro2/detail'){
@@ -1109,7 +1250,7 @@ const server=http.createServer((req,res)=>{
   });
 });
 server.listen(PORT,'127.0.0.1',()=>{
-  pro2.start();pro2Trades.start();signalLab.flush();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
+  pro2.start();pro2Trades.start();signalLab.flush();shortStudy.flush();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
   log(`合约实时数据Pro v9代 本地运行: http://localhost:${PORT}`);
   if(ENABLE_LEGACY)stopPatternFeed=startPatternFeed({markets:MARKETS,json,binance:BINANCE,okx:OKX,
     okxWs:OKX_WS,stopped:()=>stop,log});
@@ -1121,7 +1262,7 @@ server.listen(PORT,'127.0.0.1',()=>{
 });
 function shutdown(){stop=true;clearInterval(binanceTimer);clearInterval(okxTimer);
   clearTimeout(saveTimer);persistSignals();reviewHistory.save();paper.save();
-  clearInterval(signalLabTimer);signalLab.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
+  clearInterval(signalLabTimer);clearInterval(shortBookTimer);shortStudy.flush();signalLab.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
   state.wsB?.close();
   server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),2000).unref();
 }

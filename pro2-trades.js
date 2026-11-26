@@ -32,7 +32,7 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false,onTrade=()=>{}})
     const previous=latestPrint.get(symbol);
     if(!previous||at>=previous.at)latestPrint.set(symbol,{price,at,receivedAt:now});
     observer.record(symbol,side,amount,price,at);
-    if(!previous||at>=previous.at)try{onTrade(symbol,price,at)}catch(e){log('SIGNAL_LAB_TRADE '+String(e.message||e).slice(0,120))}
+    if(!previous||at>=previous.at)try{onTrade(symbol,price,at,side,amount)}catch(e){log('SIGNAL_LAB_TRADE '+String(e.message||e).slice(0,120))}
     if(amount>=MILLION){
       const start=floorHour(at),old=records.get(symbol);
       const v=old?.start===start?old:{start,firstObservedAt:at,buy:0,sell:0,buyCount:0,sellCount:0};

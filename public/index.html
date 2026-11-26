@@ -179,12 +179,16 @@
 
 <section id="signalLabPanel" class="signal-lab" aria-label="BTCUSDT 实时模拟研究">
   <div class="lab-heading"><h2>实时模拟 · BTCUSDT</h2><button type="button" class="lab-return" id="signalLabReturn">返回行情</button></div>
-  <p>四种波段阶段的独立虚拟研究账本，仅统计已经发生的公开成交结果。不连接真实交易账户，不充值、不下单、不提现。</p>
+  <p>原四种波段阶段的虚拟研究账本，以及新增五种短时行情事件研究，仅统计已经发生的公开成交结果。不连接真实交易账户，不充值、不下单、不提现。</p>
   <div class="lab-header"><strong>原模型假设：每类初始 1,000 U · 单样本 100 U · 假设 100× · 固定阈值 +13 / −17 U · 手续费 0</strong>
   <p>理论余额按固定阈值计算，另列观测穿越价格的理论盈亏。未模拟真实强平、滑点、点差、手续费与资金费率，不代表可实现收益或交易建议。断流或重启样本作废，不计胜负。</p>
   <div id="signalLabStatus" class="lab-status" role="status">等待接口…</div><p id="signalLabStarted" class="lab-open"></p></div>
   <h3>四类独立研究结果</h3><div id="signalLabCards" class="lab-cards"><p>正在读取四类模型…</p></div>
-  <h3>最近完成的研究样本</h3><p>仅展示最近100条，累计统计独立保存。未完成、作废样本不计理论胜率。</p>
+  <h3>新增五种短时模型 · 独立观察</h3>
+  <div class="lab-header"><p>仅 BTCUSDT。按连续真实成交识别已经出现的变化，统一观察其后60秒的实际价格变化；不进行杠杆买卖，不用理论胜率承诺盈利。图片未指定具体阈值，采用未验证的研究假设。盘口模型是连续快照近似，不是全量挂撤单OFI。</p><div id="shortStudyStatus" class="lab-status">等待接口…</div></div>
+  <div id="shortStudyCards" class="lab-cards" style="margin-top:10px"><p>正在读取五类研究…</p></div>
+  <h3>新增模型 · 最近完成观察</h3><div class="lab-table"><table><thead><tr><th>时间</th><th>模型</th><th>观察类别</th><th>行情环境</th><th>实际同向变化</th><th>状态</th></tr></thead><tbody id="shortStudyRows"></tbody></table></div>
+  <h3>原模型 · 最近完成的研究样本</h3><p>仅展示最近100条，累计统计独立保存。未完成、作废样本不计理论胜率。</p>
   <div class="lab-table"><table><thead><tr><th>时间</th><th>阶段</th><th>合约</th><th>结果</th><th>理论盈亏 U</th><th>观测穿越盈亏 U</th></tr></thead><tbody id="signalLabRows"></tbody></table></div>
 </section>
 <section class="practice-paused" id="practicePaused" aria-label="暂停服务"><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="20"/><path d="M20 16v16M28 16v16" stroke-linecap="round" stroke-width="3"/></svg><h2>暂停服务</h2><p>请返回其他界面</p><button type="button" id="practiceReturn">返回行情</button></section>
@@ -892,6 +896,28 @@ const money=x=>typeof x==='number'&&Number.isFinite(x)?x.toFixed(2):'—',signed
 const stamp=x=>Number.isFinite(x)&&x>0?new Date(x).toLocaleString('zh-CN',{hour12:false}):'—';
 const el=(tag,txt,cls)=>{const n=document.createElement(tag);if(txt!==undefined)n.textContent=txt;if(cls)n.className=cls;return n};
 function line(p,k,v){const r=el('div',undefined,'lab-row');r.append(el('span',k),el('b',v));p.append(r)}
+
+function renderShortStudy(d){
+  const st=$('shortStudyStatus'),box=$('shortStudyCards'),table=$('shortStudyRows');
+  if(!d||!Array.isArray(d.models)||d.models.length!==5){st.textContent='新增研究接口尚未就绪';return}
+  const fresh=d.latestAt&&d.serverAt-d.latestAt<=6000;
+  st.textContent=!d.enabled?'已暂停：'+(d.error||'未启用'):(fresh?'真实成交持续采集 · ':'等待有效成交 · ')+stamp(d.latestAt);
+  const pct=x=>Number.isFinite(x)?x.toFixed(3)+'%':'样本不足';
+  box.replaceChildren(...d.models.map((m,i)=>{
+    const c=el('section',undefined,'lab-card');
+    c.append(el('h4',String(i+5).padStart(2,'0')+' · '+m.label),el('p',m.note),el('p',fresh?m.status:'等待最新成交'));
+    line(c,'已完成观察',String(m.samples));line(c,'同向 / 反向 / 基本不变',m.aligned+' / '+m.opposite+' / '+m.flat);
+    line(c,'60秒平均同向变化',pct(m.mean));line(c,'同向比例（非胜率）',m.samples?m.alignment.toFixed(1)+'%':'样本不足');
+    line(c,'正在观察 / 作废',String(m.active?1:0)+' / '+m.invalid);
+    for(const k of ['回升','回落']){const x=m.byDirection[k];line(c,k+'样本 / 平均变化',x?x.samples+' / '+pct(x.mean):'0 / —')}
+    if(m.code==='vwap')for(const k of ['震荡','方向性']){const x=m.byRegime[k];line(c,k+'样本 / 平均变化',x?x.samples+' / '+pct(x.mean):'0 / —')}
+    return c;
+  }));
+  const names={complete:'已完成',gap:'断流作废',restart:'重启作废'};
+  table.replaceChildren(...(d.history||[]).map(r=>{const tr=el('tr');for(const x of [stamp(r.endAt),r.label,r.direction,r.regime,pct(r.change),names[r.reason]||r.reason])tr.append(el('td',x));return tr}));
+  if(!table.children.length){const tr=el('tr'),td=el('td','暂无已完成观察');td.colSpan=6;tr.append(td);table.append(tr)}
+}
+
 let busy=false;
 const active=()=>document.visibilityState==='visible'&&document.body.dataset.proView==='records';
 async function refresh(){
@@ -912,10 +938,11 @@ async function refresh(){
       line(c,'进行中 / 占用虚拟保证金',a.active+' / '+money(a.reserved)+' U');line(c,'中断作废 / 跳过',a.invalid+' / '+a.skipped);
       line(c,'最大已结算回撤',money(a.maxDrawdown)+' U');line(c,'穿越价格累计盈亏',signed(a.observedNet)+' U');return c;
     }));
+    renderShortStudy(d.shortStudy);
     const names={tp:'触及止盈',sl:'触及止损',gap:'断流作废',restart:'重启作废'};
     rows.replaceChildren(...d.history.map(h=>{const tr=el('tr');for(const x of [stamp(h.exitAt),h.label,h.symbol,names[h.reason]||h.reason,signed(h.pnl),signed(h.observedPnl)])tr.append(el('td',x));return tr}));
     if(!d.history.length){const tr=el('tr'),td=el('td','暂无已完成的真实研究样本');td.colSpan=6;tr.append(td);rows.append(tr)}
-  }catch(e){status.textContent='接口暂不可用；以下如有记录为上次读取结果，不代表当前状态。'}
+  }catch(e){status.textContent='接口暂不可用；以下如有记录为上次读取结果，不代表当前状态。';$('shortStudyStatus').textContent='接口暂不可用，现有记录为上次结果。'}
   finally{clearTimeout(timer);busy=false}
 }
 $('signalLabReturn').onclick=()=>document.querySelector('[data-pro-tab="market"]').click();
