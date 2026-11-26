@@ -11,6 +11,7 @@ const {createReviewHistory}=require('./forward-review');
 const {VERSION:RULE_VERSION,binanceBar,receiveBars,analyze,buySell,startPatternFeed}=require('./pattern-feed');
 const {createPro2}=require('./pro2-engine');
 const {createPro2Trades}=require('./pro2-trades');
+const {openSignalLab,PAGE:signalLabPage}=require('./signal-lab');
 
 const PORT=Number(process.env.PORT||3088);
 const ENABLE_LEGACY=false; // Five-contract mode: no legacy scanning or paper polling.
@@ -32,7 +33,10 @@ const paper=createPaperTrader({file:path.join(dataPath,reverse?'paper-reverse-or
   stoppedAt:Number(process.env.CONTRACT_LENS_PAPER_STOPPED_AT)||0,reverse});
 const MARKETS=new Map();
 const pro2=createPro2({markets:MARKETS,json,binance:BINANCE,okx:OKX,log,stopped:()=>stop,dataDir:dataPath,allowedSymbols:FIVE_SYMBOLS});
-const pro2Trades=createPro2Trades({markets:MARKETS,log,stopped:()=>stop});
+const signalLab=openSignalLab({file:path.join(dataPath,'swing-signal-lab-v1.json'),log});
+const pro2Trades=createPro2Trades({markets:MARKETS,log,stopped:()=>stop,onTrade:(symbol,price,at)=>signalLab.trade(symbol,price,at)});
+let signalLabTimer=null;
+function scanSignalLab(){try{const now=Date.now();signalLab.sweep(now);for(const symbol of FIVE_SYMBOLS)if(MARKETS.has(symbol))signalLab.scan(symbol,pro2Trades.getSwing(symbol),now)}catch(e){log('SIGNAL_LAB_SCAN '+String(e.message||e).slice(0,120))}}
 let stopPatternFeed;
 const state={startedAt:Date.now(),binance:{connected:false,rest:false,ws:false,at:0,error:''},
   okx:{connected:false,rest:false,ws:false,at:0,error:''},historyDone:0,historyTotal:0,
@@ -304,6 +308,8 @@ const server=http.createServer((req,res)=>{
   if(req.method!=='GET')return reply(res,405,{error:'只允许GET；无交易/下单API'});
   let url;try{url=new URL(req.url,'http://localhost')}catch{return reply(res,400,{error:'无效请求'})}
   if(url.pathname==='/api/ui-error'){log('PRO_FRONTEND_ERROR '+(url.searchParams.get('message')||'unknown').slice(0,200));return reply(res,200,{ok:true})}
+  if(url.pathname==='/signal-lab')return reply(res,200,signalLabPage,'text/html; charset=utf-8');
+  if(url.pathname==='/api/pro2/signal-lab')return reply(res,200,signalLab.snapshot());
   if(url.pathname==='/api/pro2/snapshot')return reply(res,200,pro2.snapshot(pro2Trades));
   if(url.pathname==='/api/pro2/flow-health')return reply(res,200,pro2Trades.health());
   if(url.pathname==='/api/pro2/detail'){
@@ -337,6 +343,7 @@ const server=http.createServer((req,res)=>{
 });
 server.listen(PORT,'127.0.0.1',()=>{
   pro2.start();pro2Trades.start();
+  signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
   log(`Contract Lens Pro 本地运行: http://localhost:${PORT}`);
   if(ENABLE_LEGACY)stopPatternFeed=startPatternFeed({markets:MARKETS,json,binance:BINANCE,okx:OKX,
     okxWs:OKX_WS,stopped:()=>stop,log});
@@ -348,6 +355,7 @@ server.listen(PORT,'127.0.0.1',()=>{
 });
 function shutdown(){stop=true;clearInterval(binanceTimer);clearInterval(okxTimer);
   clearTimeout(saveTimer);persistSignals();reviewHistory.save();paper.save();
+  clearInterval(signalLabTimer);signalLab.flush();
   stopPatternFeed?.();pro2.stop();pro2Trades.stop();
   state.wsB?.close();
   server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),2000).unref();
