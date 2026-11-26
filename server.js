@@ -1242,6 +1242,21 @@ async function sampleStudyBook(){
   }catch{}finally{shortBookBusy=false}
 }
 
+
+function swingStudySummary(symbol,study,now=Date.now()){
+  if(symbol!=='BTCUSDT')return {supported:false,reason:'新增五类模型目前仅有 BTCUSDT 独立研究数据，不混用其他合约样本'};
+  const d=study.snapshot(now);
+  const fresh=d.enabled&&Number.isFinite(d.latestAt)&&d.latestAt>0&&now-d.latestAt<=6000&&d.latestAt<=now+1000;
+  const bookFresh=Number.isFinite(d.bookAt)&&d.bookAt>0&&now-d.bookAt<=10000&&d.bookAt<=now+1000;
+  return {supported:true,enabled:d.enabled,fresh,latestAt:d.latestAt||null,bookFresh,bookAt:d.bookAt||null,horizonSeconds:d.horizonSeconds,serverAt:now,
+    models:d.models.map(m=>{
+      const last=d.history.find(x=>x.code===m.code&&x.reason==='complete');
+      return {code:m.code,label:m.label,note:m.note,status:!d.enabled?'研究已暂停':!fresh?'等待新鲜公开成交':m.code==='ofi'&&!bookFresh?'等待有效盘口快照':m.status,
+        samples:m.samples,aligned:m.aligned,opposite:m.opposite,flat:m.flat,invalid:m.invalid,mean:m.mean,alignment:m.alignment,lastCompletedAt:last?.endAt||null,
+        byRegime:m.code==='vwap'?m.byRegime:undefined};
+    })};
+}
+
 const server=http.createServer((req,res)=>{
   let url;try{url=new URL(req.url,'http://localhost')}catch{return reply(res,400,{error:'无效请求'})}
   if(!accessGate(req,res,url))return;
@@ -1275,7 +1290,7 @@ const server=http.createServer((req,res)=>{
     const symbol=(url.searchParams.get('symbol')||'').toUpperCase();
     const m=MARKETS.get(symbol);if(!m)return reply(res,404,{error:'合约不可用'});
     if(!pro2Trades.watch(symbol))return reply(res,200,{version:'ssr-research-v1',symbol,ready:false,reason:'该合约暂无支持的公开主动成交流',periods:[]});
-    return reply(res,200,{...pro2Trades.getSwing(symbol),symbol,exchangeLabel:m.exchangeLabel});
+    return reply(res,200,{...pro2Trades.getSwing(symbol),symbol,exchangeLabel:m.exchangeLabel,shortStudy:swingStudySummary(symbol,shortStudy)});
   }
   if(url.pathname==='/api/pro2/health')return reply(res,200,pro2.state());
   if(url.pathname==='/api/paper')return reply(res,200,paper.snapshot(Date.now()));
