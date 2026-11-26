@@ -564,11 +564,11 @@
   }
 
 
-  // Optional quiet reminder for completed five-minute research records only.
+  // Optional quiet reminder for completed two-minute research records only.
   // Never reacts to a live direction, a candidate event or a quotation.
   function completedReviewStamp(v){
     if(v?.symbol!=='BTCUSDT'||!Array.isArray(v.horizonAudit?.history))return null;
-    return v.horizonAudit.history.reduce((n,r)=>r?.reason==='complete'&&r.minutes===5&&Number.isFinite(r.endedAt)&&r.endedAt>0&&r.endedAt<=v.horizonAudit.serverAt+1000?Math.max(n,r.endedAt):n,0);
+    return v.horizonAudit.history.reduce((n,r)=>r?.reason==='complete'&&r.minutes===2&&Number.isFinite(r.endedAt)&&r.endedAt>0&&r.endedAt<=v.horizonAudit.serverAt+1000?Math.max(n,r.endedAt):n,0);
   }
   let reviewSound=false,reviewAudio=null,reviewSeen=null,reviewLastNotice=0;
   const reviewToggle=$('swingReviewSound'),reviewNotice=$('swingReviewNotice');
@@ -583,7 +583,7 @@
       if(reviewAudio.state!=='running')await reviewAudio.resume();
       if(!swingDialog.open||generation!==swingGeneration)return;
       if(reviewAudio.state!=='running')throw Error('audio unavailable');
-      reviewSound=true;reviewSeen=completedReviewStamp(swingFullData);reviewNotice.textContent='已开启：5分钟复核完成时轻提示';reviewNotice.hidden=false;paintReviewToggle();
+      reviewSound=true;reviewSeen=completedReviewStamp(swingFullData);reviewNotice.textContent='已开启：2分钟复核完成时轻提示';reviewNotice.hidden=false;paintReviewToggle();
     }catch{reviewSound=false;paintReviewToggle();reviewNotice.textContent='声音不可用，请重新点击开启';reviewNotice.hidden=false}
   });
   function reviewCompleted(v){
@@ -593,7 +593,7 @@
     if(!reviewSound||prev===null||latest<=prev||document.visibilityState!=='visible'||!swingDialog.open)return;
     const t=Date.now();
     if(t-reviewLastNotice<60000)return;
-    reviewLastNotice=t;reviewNotice.textContent='已有新的5分钟历史复核结果';reviewNotice.hidden=false;
+    reviewLastNotice=t;reviewNotice.textContent='已有新的2分钟历史复核结果 · 非下单提示';reviewNotice.hidden=false;
     if(reviewAudio?.state!=='running')return;
     try{
       const at=reviewAudio.currentTime,o=reviewAudio.createOscillator(),g=reviewAudio.createGain();
