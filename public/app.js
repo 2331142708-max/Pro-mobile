@@ -673,9 +673,14 @@
   function playReviewTone(){
     if(!reviewSound||reviewVolume===0||!swingDialog.open||document.visibilityState!=='visible'||reviewAudio?.state!=='running')return;
     try{
-      const at=reviewAudio.currentTime,o=reviewAudio.createOscillator(),g=reviewAudio.createGain();
-      o.type='sine';o.frequency.value=523.25;g.gain.setValueAtTime(.0001,at);g.gain.exponentialRampToValueAtTime(.045*reviewVolume/100,at+.035);g.gain.exponentialRampToValueAtTime(.0001,at+.22);
-      o.connect(g);g.connect(reviewAudio.destination);o.start(at);o.stop(at+.23);
+      // Original radar-style electronic chime; no Apple ringtone audio.
+      const at=reviewAudio.currentTime,peak=.045*reviewVolume/100;
+      for(const [offset,frequency,level] of [[0,740,1],[.17,555,.72]]){
+        const start=at+offset,o=reviewAudio.createOscillator(),g=reviewAudio.createGain();
+        o.type='sine';o.frequency.setValueAtTime(frequency,start);o.frequency.exponentialRampToValueAtTime(frequency*.94,start+.14);
+        g.gain.setValueAtTime(.0001,start);g.gain.exponentialRampToValueAtTime(Math.max(.00011,peak*level),start+.018);g.gain.exponentialRampToValueAtTime(.0001,start+.15);
+        o.connect(g);g.connect(reviewAudio.destination);o.start(start);o.stop(start+.16);
+      }
     }catch{}
   }
 
