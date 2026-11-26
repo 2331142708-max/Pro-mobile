@@ -512,10 +512,15 @@
       const bg=({'#168568':'#dcf3e8','#c43d48':'#fce3e6','#2563b8':'#e0edff'})[color]||'#e9edf3';
       return '<span style="display:inline-block;vertical-align:baseline;white-space:nowrap;font-size:inherit;line-height:1.15;font-weight:700;color:'+color+';background-color:'+bg+';border:1px solid '+color+';border-radius:4px;padding:0 3px;">'+esc(label)+'</span>';
     };
+    const historyTime=t=>{
+      if(!Number.isFinite(t)||t<=0||!Number.isFinite(new Date(t).getTime()))return ' <span style="white-space:nowrap">—</span>';
+      const dt=new Date(t),label=dt.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+      return ' <time datetime="'+dt.toISOString()+'" title="历史60秒观察完成时间" style="display:inline-block;white-space:nowrap;font-variant-numeric:tabular-nums;color:#475569;">'+esc(label)+'</time>';
+    };
     const models=definitions.map(([key,name])=>{
       const m=d?.models?.find(x=>x.code===key),sm=short?.models?.find(x=>x.code===key);
       const last=sm?.lastCompleted;
-      const note=!d?'无独立样本':!d.enabled?'研究暂停':!fresh?'数据待更新':key==='ofi'&&!short?.bookFresh?'盘口待更新':last&&Number.isFinite(last.change)?'历史 '+historyTag(last.direction==='回升'?'上升':last.direction==='回落'?'下降':last.direction,last.direction==='回升'?'#168568':last.direction==='回落'?'#c43d48':'#64748b')+' · '+(last.change>.005?historyTag('正确','#168568'):last.change<-.005?historyTag('错误','#c43d48'):historyTag('温和','#2563b8')):key==='ssr'?'独立历史复核':'样本未验证';
+      const note=!d?'无独立样本':!d.enabled?'研究暂停':!fresh?'数据待更新':key==='ofi'&&!short?.bookFresh?'盘口待更新':last&&Number.isFinite(last.change)?'历史 '+historyTag(last.direction==='回升'?'上升':last.direction==='回落'?'下降':last.direction,last.direction==='回升'?'#168568':last.direction==='回落'?'#c43d48':'#64748b')+' · '+(last.change>.005?historyTag('正确','#168568'):last.change<-.005?historyTag('错误','#c43d48'):historyTag('温和','#2563b8'))+historyTime(last.endAt??sm?.lastCompletedAt):key==='ssr'?'独立历史复核':'样本未验证';
       const cells=[2,3,4,5].map(minute=>{const w=m?.windows?.find(x=>x.minute===minute);
         return '<td>'+(w?.n?'<b>'+esc(w.same)+'/'+esc(w.n)+'</b><small>'+pct(w.meanAdverse)+'</small>':'—')+'</td>';
       }).join('');
@@ -532,7 +537,7 @@
       '<section class="sd-box sd-historical"><button class="sd-section-title" type="button" data-swing-screen="prices">已结束模拟 · 历史价格 <span>详情 ›</span></button><div class="sd-prices">'+priceCell('模拟参考价',last?.entry)+priceCell('止盈复核价',last?.reason==='tp'?last.exit:null)+priceCell('止损复核价',last?.reason==='sl'?last.exit:null)+'</div><div class="sd-foot">'+(last?esc(last.label)+' · '+stamp(last.exitAt):'暂无对应历史记录')+(guard?.stoppedAt?' · 模拟已停止新增':'')+'</div></section>'+
       '<div class="sd-state-grid"><button type="button" data-swing-screen="risk" class="sd-box sd-risk sd-risk-'+level+'"><small>已观测风险 ›</small><b>'+riskLabels[level]+'</b><small>'+ (riskNotes||'仅评估已观测项目')+'</small></button><button type="button" data-swing-screen="stage" class="sd-box sd-stage"><small>原SSR · 已发生阶段 ›</small><b>'+esc(stage)+'</b><small>前：未确认　中：'+(observed?'已观察':'未确认')+'　后：未确认</small></button></div>'+
       '<button type="button" class="sd-box sd-follow" data-swing-screen="follow"><span>60秒追踪 · '+esc(fLabels[f?.stage]||'等待数据')+'</span><b>'+(elapsed===null?'—':elapsed+'/60秒')+' ›</b></button>'+
-      '<section class="sd-box sd-models"><button class="sd-section-title" type="button" data-swing-screen="models">六模型 · 2–5分钟历史复核 <span>详情 ›</span></button><div class="sd-foot">同向/完成笔数 · 下方小字为平均最大反向幅度</div><table class="sd-table"><thead><tr><th scope="col">模型</th><th scope="col">2分</th><th scope="col">3分</th><th scope="col">4分</th><th scope="col">5分</th></tr></thead><tbody>'+models+'</tbody></table></section>'+
+      '<section class="sd-box sd-models"><button class="sd-section-title" type="button" data-swing-screen="models">六模型 · 2–5分钟历史复核 <span>详情 ›</span></button><div class="sd-foot">同向/完成笔数 · 小字为平均最大反向幅度 · 时间为60秒观察完成时刻</div><table class="sd-table"><thead><tr><th scope="col" style="width:43%">模型</th><th scope="col">2分</th><th scope="col">3分</th><th scope="col">4分</th><th scope="col">5分</th></tr></thead><tbody>'+models+'</tbody></table></section>'+
       '<section class="sd-box sd-periods"><button class="sd-section-title" type="button" data-swing-screen="periods">1 / 3 / 5分钟已发生变化 <span>详情 ›</span></button><table class="sd-table"><thead><tr><th scope="col">周期</th><th scope="col">涨跌</th><th scope="col">回升</th><th scope="col">回落</th><th scope="col">主动买</th></tr></thead><tbody>'+periods+'</tbody></table></section>'+
       '<div class="sd-bottom"><span>只读研究 · 历史结果非交易信号</span><button type="button" data-swing-screen="history">历史区间 ›</button></div></div>';
   }
