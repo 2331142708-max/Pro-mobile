@@ -609,6 +609,29 @@
   }
   let reviewSound=false,reviewAudio=null,reviewSeen=null,reviewLastNotice=0,reviewPulse=null,reviewToneTimers=[];
   const reviewToggle=$('swingReviewSound'),reviewNotice=$('swingReviewNotice');
+  const clampReviewVolume=v=>Number.isFinite(Number(v))?Math.max(0,Math.min(400,Math.round(Number(v)))):100;
+  const reviewVolumeKey='swing-review-volume-v1';
+  let reviewVolume=clampReviewVolume(read(reviewVolumeKey,100));
+  const reviewVolumeButton=document.createElement('button');
+  reviewVolumeButton.type='button';reviewVolumeButton.id='swingReviewVolume';reviewVolumeButton.setAttribute('aria-expanded','false');
+  reviewVolumeButton.style.cssText='width:auto;height:30px;padding:5px 7px;font-size:11px;white-space:nowrap;border-radius:5px;line-height:1';
+  reviewToggle.insertAdjacentElement('afterend',reviewVolumeButton);
+  const reviewVolumePanel=document.createElement('div');reviewVolumePanel.hidden=true;
+  reviewVolumePanel.style.cssText='padding:7px 12px;background:#f2f5f8;border-bottom:1px solid #dce3ed;flex:none;font-size:12px;color:#475569';
+  reviewVolumePanel.innerHTML='<div style="display:flex;align-items:center;gap:8px"><label for="swingVolumeRange">音量</label><input id="swingVolumeRange" type="range" min="0" max="400" step="1" style="flex:1;min-width:0;accent-color:#64748b"><output id="swingVolumeValue" for="swingVolumeRange" style="min-width:43px;text-align:right;font-variant-numeric:tabular-nums"></output></div><div style="display:flex;justify-content:space-between;font-size:10px"><span>0 静音</span><span>100 原音量</span><span>400 最大</span></div>';
+  reviewNotice.insertAdjacentElement('afterend',reviewVolumePanel);
+  const reviewVolumeRange=$('swingVolumeRange'),reviewVolumeValue=$('swingVolumeValue');
+  function paintReviewVolume(){
+    reviewVolumeRange.value=String(reviewVolume);reviewVolumeValue.textContent=reviewVolume+'%';reviewVolumeButton.textContent='音量 '+reviewVolume+'%';
+  }
+  function hideReviewVolume(){reviewVolumePanel.hidden=true;reviewVolumeButton.setAttribute('aria-expanded','false')}
+  reviewVolumeButton.addEventListener('click',()=>{reviewVolumePanel.hidden=!reviewVolumePanel.hidden;reviewVolumeButton.setAttribute('aria-expanded',String(!reviewVolumePanel.hidden));});
+  reviewVolumeRange.addEventListener('input',()=>{
+    reviewVolume=clampReviewVolume(reviewVolumeRange.value);paintReviewVolume();
+    try{localStorage.setItem(accountKey(reviewVolumeKey),JSON.stringify(reviewVolume))}catch{}
+  });
+  paintReviewVolume();
+
   function clearReviewPulse(){for(const timer of reviewToneTimers)clearTimeout(timer);reviewToneTimers=[];if(reviewPulse){reviewPulse.remove();reviewPulse=null;}}
   function showReviewPulse(){
     clearReviewPulse();
@@ -620,7 +643,7 @@
     try{const animation=el.animate([{opacity:0},{opacity:1},{opacity:0}],{duration:1400,iterations:4,easing:'ease-in-out'});animation.onfinish=animation.oncancel=()=>{el.remove();if(reviewPulse===el)reviewPulse=null;};return true;}catch{clearReviewPulse();return false;}
   }
   function paintReviewToggle(){reviewToggle.textContent=reviewSound?'提醒开':'提醒关';reviewToggle.setAttribute('aria-pressed',String(reviewSound));}
-  function resetReviewReminder(){clearReviewPulse();reviewSound=false;reviewSeen=null;reviewLastNotice=0;reviewNotice.hidden=true;reviewNotice.textContent='';paintReviewToggle()}
+  function resetReviewReminder(){hideReviewVolume();clearReviewPulse();reviewSound=false;reviewSeen=null;reviewLastNotice=0;reviewNotice.hidden=true;reviewNotice.textContent='';paintReviewToggle()}
   reviewToggle.addEventListener('click',async()=>{
     if(reviewSound){clearReviewPulse();reviewSound=false;reviewNotice.hidden=true;paintReviewToggle();return}
     const generation=swingGeneration;
@@ -648,10 +671,10 @@
     }else{playReviewTone();}
   }
   function playReviewTone(){
-    if(!reviewSound||!swingDialog.open||document.visibilityState!=='visible'||reviewAudio?.state!=='running')return;
+    if(!reviewSound||reviewVolume===0||!swingDialog.open||document.visibilityState!=='visible'||reviewAudio?.state!=='running')return;
     try{
       const at=reviewAudio.currentTime,o=reviewAudio.createOscillator(),g=reviewAudio.createGain();
-      o.type='sine';o.frequency.value=523.25;g.gain.setValueAtTime(.0001,at);g.gain.exponentialRampToValueAtTime(.045,at+.035);g.gain.exponentialRampToValueAtTime(.0001,at+.22);
+      o.type='sine';o.frequency.value=523.25;g.gain.setValueAtTime(.0001,at);g.gain.exponentialRampToValueAtTime(.045*reviewVolume/100,at+.035);g.gain.exponentialRampToValueAtTime(.0001,at+.22);
       o.connect(g);g.connect(reviewAudio.destination);o.start(at);o.stop(at+.23);
     }catch{}
   }
