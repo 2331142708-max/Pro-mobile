@@ -33,10 +33,10 @@ const paper=createPaperTrader({file:path.join(dataPath,reverse?'paper-reverse-or
   stoppedAt:Number(process.env.CONTRACT_LENS_PAPER_STOPPED_AT)||0,reverse});
 const MARKETS=new Map();
 const pro2=createPro2({markets:MARKETS,json,binance:BINANCE,okx:OKX,log,stopped:()=>stop,dataDir:dataPath,allowedSymbols:FIVE_SYMBOLS});
-const signalLab=openSignalLab({file:path.join(dataPath,'swing-signal-lab-v1.json'),log});
-const pro2Trades=createPro2Trades({markets:MARKETS,log,stopped:()=>stop,onTrade:(symbol,price,at)=>signalLab.trade(symbol,price,at)});
+const signalLab=openSignalLab({file:path.join(dataPath,'swing-signal-lab-btc-v1.json'),log});
+const pro2Trades=createPro2Trades({markets:MARKETS,log,stopped:()=>stop,onTrade:(symbol,price,at)=>{if(symbol==='BTCUSDT')signalLab.trade(symbol,price,at)}});
 let signalLabTimer=null;
-function scanSignalLab(){try{const now=Date.now();signalLab.sweep(now);for(const symbol of FIVE_SYMBOLS)if(MARKETS.has(symbol))signalLab.scan(symbol,pro2Trades.getSwing(symbol),now)}catch(e){log('SIGNAL_LAB_SCAN '+String(e.message||e).slice(0,120))}}
+function scanSignalLab(){try{const now=Date.now();signalLab.sweep(now);if(MARKETS.has('BTCUSDT'))signalLab.scan('BTCUSDT',pro2Trades.getSwing('BTCUSDT'),now)}catch(e){log('SIGNAL_LAB_SCAN '+String(e.message||e).slice(0,120))}}
 let stopPatternFeed;
 const state={startedAt:Date.now(),binance:{connected:false,rest:false,ws:false,at:0,error:''},
   okx:{connected:false,rest:false,ws:false,at:0,error:''},historyDone:0,historyTotal:0,
@@ -308,7 +308,7 @@ const server=http.createServer((req,res)=>{
   if(req.method!=='GET')return reply(res,405,{error:'只允许GET；无交易/下单API'});
   let url;try{url=new URL(req.url,'http://localhost')}catch{return reply(res,400,{error:'无效请求'})}
   if(url.pathname==='/api/ui-error'){log('PRO_FRONTEND_ERROR '+(url.searchParams.get('message')||'unknown').slice(0,200));return reply(res,200,{ok:true})}
-  if(url.pathname==='/signal-lab')return reply(res,200,signalLabPage,'text/html; charset=utf-8');
+  if(url.pathname==='/signal-lab'||url.pathname==='/real-time-simulation')return reply(res,200,signalLabPage,'text/html; charset=utf-8');
   if(url.pathname==='/api/pro2/signal-lab')return reply(res,200,signalLab.snapshot());
   if(url.pathname==='/api/pro2/snapshot')return reply(res,200,pro2.snapshot(pro2Trades));
   if(url.pathname==='/api/pro2/flow-health')return reply(res,200,pro2Trades.health());
