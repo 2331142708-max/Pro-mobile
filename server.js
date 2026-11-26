@@ -36,8 +36,8 @@ const pro2=createPro2({markets:MARKETS,json,binance:BINANCE,okx:OKX,log,stopped:
 /* Read-only BTCUSDT signal lab imported from the supplied component's source
  * commit. Inlined to comply with the existing deployment file allowlist. */
 function createLab({initial=null,save=()=>{},now=Date.now,enabled=true,error=""}={}){
-  const config=Object.freeze({symbol:"BTCUSDT",capital:1000,margin:100,leverage:100,tp:13,sl:17,fee:0,maxGapMs:6000});
-  const labels={up_early:"回升起步",up_elapsed:"回升已发生",down_early:"回落起步",down_elapsed:"回落已发生"};
+  const config=Object.freeze({symbol:"BTCUSDT",capital:1000,margin:100,leverage:125,tp:15,sl:15,fee:0,maxGapMs:6000});
+  const labels={consensus3:"方案1 · 三模型同向",consensus32:"方案2 · 三同向＋两结果一致"};
   const codes=Object.keys(labels);
   const fresh=()=>({version:1,startedAt:now(),accounts:Object.fromEntries(codes.map(code=>[code,{balance:1000,wins:0,losses:0,invalid:0,skipped:0,observedNet:0,peak:1000,maxDrawdown:0,bySymbol:{},positions:{},lastTurn:{}}])),history:[]});
   const s=initial||fresh();
@@ -65,18 +65,32 @@ function createLab({initial=null,save=()=>{},now=Date.now,enabled=true,error=""}
   }
   // A restart cannot recreate the unseen path. Never count an interrupted position as a winner.
   if(alive){let changed=false;for(const code of codes)for(const [sym,p] of Object.entries(s.accounts[code].positions)){finish(code,sym,p,now(),"restart");changed=true}if(enforceLossLimit(now()))changed=true;if(changed)persist()}
-  function scan(symbol,view,t=now()){
-    if(symbol!==config.symbol||s.lossStoppedAt)return false;
-    if(!alive||!view?.ready||!Number.isFinite(view.latestAt)||t-view.latestAt>config.maxGapMs||view.latestAt>t+1000)return false;
-    const code=view.phase?.code,turn=view.phase?.turnAt;
-    if(!codes.includes(code)||!Number.isFinite(turn)||turn>view.latestAt||view.latestAt-turn>60000)return false;
-    const a=s.accounts[code];
-    if((a.lastTurn[symbol]??-Infinity)>=turn)return false;
-    a.lastTurn[symbol]=turn;
-    if(a.positions[symbol]||a.balance-used(a)<config.margin){a.skipped++;stat(a,symbol).skipped++;persist();return false}
-    // Reserve virtual margin and wait for the next fresh public trade, not a retrospectively selected price.
-    a.positions[symbol]={symbol,code,turnAt:turn,detectedAt:t,afterAt:view.latestAt,margin:config.margin,entry:null,lastAt:t};
-    persist();return true;
+  // The inputs are completed 60-second observations, never active entry signals.
+  // One distinct combination per ledger. Old records and stale observations do not vote.
+  function scan(symbol,study,t=now()){
+    if(symbol!==config.symbol||s.lossStoppedAt||!alive||!study?.enabled||!Number.isFinite(study.latestAt)||t-study.latestAt>config.maxGapMs||study.latestAt>t+1000)return false;
+    const codes5=['exhaustion','failed_break','absorption','ofi','vwap'];
+    const votes=codes5.map(k=>(study.history||[]).find(x=>x.code===k&&x.reason==='complete')).filter(x=>x&&Number.isFinite(x.change)&&Number.isFinite(x.endAt)&&x.endAt>=s.startedAt&&x.endAt<=study.latestAt&&t-x.endAt<=300000&&['回升','回落'].includes(x.direction)&&(x.code!=='ofi'||Number.isFinite(study.bookAt)&&t-study.bookAt<=10000));
+    const up=votes.filter(x=>x.direction==='回升'),down=votes.filter(x=>x.direction==='回落');
+    const agreeing=up.length>=3?up:down.length>=3?down:null;
+    if(!agreeing)return false;
+    const direction=agreeing[0].direction==='回升'?1:-1;
+    const counts={correct:0,wrong:0,flat:0};
+    for(const x of agreeing)counts[x.change>.005?'correct':x.change<-.005?'wrong':'flat']++;
+    const sameResult=Math.max(...Object.values(counts))>=2;
+    const key=agreeing.map(x=>x.code+':'+x.endAt+':'+x.direction).sort().join('|');
+    let dirty=false,entered=false;
+    for(const code of codes){
+      if(code==='consensus32'&&!sameResult)continue;
+      const a=s.accounts[code];
+      if(a.lastTurn[symbol]===key)continue;
+      a.lastTurn[symbol]=key;dirty=true;
+      if(a.positions[symbol]||a.balance-used(a)<config.margin){a.skipped++;stat(a,symbol).skipped++;continue}
+      a.positions[symbol]={symbol,code,direction,turnAt:Math.max(...agreeing.map(x=>x.endAt)),detectedAt:t,afterAt:study.latestAt,margin:config.margin,entry:null,lastAt:t};
+      entered=true;
+    }
+    if(dirty)persist();
+    return entered;
   }
   function trade(symbol,price,at,t=now()){
     if(symbol!==config.symbol)return;
@@ -86,13 +100,13 @@ function createLab({initial=null,save=()=>{},now=Date.now,enabled=true,error=""}
       const p=s.accounts[code].positions[symbol];if(!p)continue;
       if(p.entry===null){
         if(t-p.detectedAt>config.maxGapMs){finish(code,symbol,p,t,"gap");changed=true;continue}
-        if(at<p.afterAt||at<p.detectedAt-1000)continue;
+        if(at<=p.afterAt||at<p.detectedAt)continue;
         p.entry=price;p.entryAt=at;p.lastAt=at;changed=true;continue;
       }
       if(at<p.lastAt)continue;
       if(at-p.lastAt>config.maxGapMs){finish(code,symbol,p,t,"gap");changed=true;continue}
       p.lastAt=at;
-      const raw=(code.startsWith("up")?1:-1)*(price/p.entry-1)*p.margin*config.leverage;
+      const raw=p.direction*(price/p.entry-1)*p.margin*config.leverage;
       if(raw>=config.tp-1e-8||raw<=-config.sl+1e-8){finish(code,symbol,p,at,raw>0?"tp":"sl",price,round(raw));changed=true;if(enforceLossLimit(t))break}
     }
     if(s.lossStoppedAt){for(const code of codes)for(const [sym,p] of Object.entries(s.accounts[code].positions)){finish(code,sym,p,t,"loss_limit");changed=true}}
@@ -104,7 +118,7 @@ function createLab({initial=null,save=()=>{},now=Date.now,enabled=true,error=""}
     if(changed)persist();
   }
   function snapshot(t=now()){
-    return {version:"swing-signal-lab-btc-v1",symbol:config.symbol,config,startedAt:s.startedAt,serverAt:t,latestAt,enabled:alive,error:failure,lossGuard:{limit:lossLimit,net:netTotal(),stoppedAt:s.lossStoppedAt||null},
+    return {version:"swing-consensus-lab-btc-v1",symbol:config.symbol,config,startedAt:s.startedAt,serverAt:t,latestAt,enabled:alive,error:failure,lossGuard:{limit:lossLimit,net:netTotal(),stoppedAt:s.lossStoppedAt||null},
       accounts:codes.map(code=>{const a=s.accounts[code],count=a.wins+a.losses;return {code,label:labels[code],balance:a.balance,net:round(a.balance-config.capital),reserved:used(a),active:Object.keys(a.positions).length,wins:a.wins,losses:a.losses,invalid:a.invalid,skipped:a.skipped,observedNet:a.observedNet,maxDrawdown:a.maxDrawdown,winRate:count?round(a.wins/count*100):null,bySymbol:a.bySymbol}}),
       history:s.history.slice(0,100)};
   }
@@ -326,7 +340,7 @@ function openShortStudy(file){
 }
 
 const shortStudy=openShortStudy(path.join(dataPath,'btc-short-observation-v1.json'));
-const signalLab=openSignalLab({file:path.join(dataPath,'swing-signal-lab-btc-v1.json'),log});
+const signalLab=openSignalLab({file:path.join(dataPath,'swing-consensus-lab-btc-v1.json'),log});
 const pro2Trades=createPro2Trades({markets:MARKETS,log,stopped:()=>stop,onTrade:(symbol,price,at,side,amount)=>{if(symbol==='BTCUSDT'){signalLab.trade(symbol,price,at);shortStudy.onTrade(symbol,price,at,side,amount);horizonAudit.trade(symbol,price,at)}}});
 
 // Retain observed SSR events, not future trade signals. The 60-second window
@@ -425,7 +439,7 @@ const swingFollow=openSwingFollow(path.join(dataPath,'ssr-follow-v1.json'),FIVE_
 let signalLabTimer=null;
 function scanSignalLab(){
   if(stop)return;
-  try{const now=Date.now();signalLab.sweep(now);horizonAudit.sweep(now);shortStudy.scan(now);for(const symbol of FIVE_SYMBOLS){if(!MARKETS.has(symbol))continue;const view=pro2Trades.getSwing(symbol);swingFollow.observe(symbol,view,now);if(symbol==='BTCUSDT')signalLab.scan(symbol,view,now)}}
+  try{const now=Date.now();signalLab.sweep(now);horizonAudit.sweep(now);shortStudy.scan(now);for(const symbol of FIVE_SYMBOLS){if(!MARKETS.has(symbol))continue;const view=pro2Trades.getSwing(symbol);swingFollow.observe(symbol,view,now);if(symbol==='BTCUSDT')signalLab.scan(symbol,shortStudy.snapshot(now),now)}}
   catch(e){log('SIGNAL_LAB_SCAN '+String(e.message||e).slice(0,120))}
 }
 
