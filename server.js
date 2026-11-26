@@ -760,7 +760,7 @@ function cookieOptions(req){
 function sessionToken(req){return /(?:^|;\s*)pro_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie||'')?.[1]}
 function currentUser(req){
   const token=sessionToken(req),session=token&&sessions.get(token);
-  if(!session||session.until<=Date.now()||!session.user)return null;
+  if(!session||session.until<=Date.now()||!session.user||session.quickLocked)return null;
   return session.user;
 }
 function startSession(req,res,user,remember=false){
@@ -772,9 +772,72 @@ function startSession(req,res,user,remember=false){
   const cookies=['pro_session='+t+cookieOptions(req)+'; Max-Age='+seconds,'pro_remember_user='+(remember?user.username:'')+cookieOptions(req)+'; Max-Age='+(remember?30*86400:0)];
   res.writeHead(303,{'Location':'/','Cache-Control':'no-store','Set-Cookie':cookies});res.end();
 }
+
+function quickPinHash(token,pin){return crypto.createHmac('sha256',token).update('pro-quick-pin:'+pin).digest('hex')}
+function quickPinMatches(token,pin,hash){
+  return /^[0-9]{1,8}$/.test(pin)&&typeof hash==='string'&&/^[a-f0-9]{64}$/.test(hash)&&crypto.timingSafeEqual(Buffer.from(quickPinHash(token,pin),'hex'),Buffer.from(hash,'hex'));
+}
+function quickPage(req,res,session,message='',status=200){
+  if(!session.quickCsrf)session.quickCsrf=crypto.randomBytes(24).toString('hex');
+  const field='<input type="hidden" name="csrf" value="'+session.quickCsrf+'">';
+  const form=(op,body)=>'<form method="post" action="/device-lock">'+field+'<input type="hidden" name="op" value="'+op+'">'+body+'</form>';
+  const pinInput='<label for="quickPin">数字快捷码</label><input id="quickPin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{1,8}" maxlength="8" minlength="1" required autocomplete="off">';
+  const configured=!!session.quickHash;
+  const main=session.quickLocked?form('unlock',pinInput+'<button>解锁</button>')+'<p>输入错误三次将结束本次登录。</p>':
+    (configured?form('lock','<button>立即锁定本设备</button>')+form('remove','<button class="secondary">关闭快捷解锁</button>'):'')+
+    form('setup','<label for="fullPassword">当前完整登录密码</label><input id="fullPassword" name="password" type="password" maxlength="128" required autocomplete="current-password">'+pinInput+'<p>可设置1至8位数字。设置后立即锁定，原登录密码不变。</p><button>'+ (configured?'重新设置并锁定':'设置并锁定')+'</button>');
+  const back=session.quickLocked?'<a href="/login">使用完整密码重新登录</a>':'<a href="/">返回网站</a>';
+  res.writeHead(status,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"});
+  res.end('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>管理员快捷解锁</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#ededed;display:grid;place-items:center;font:16px system-ui,sans-serif;color:#171717;padding:20px}main{width:100%;max-width:390px;background:#fff;border-radius:12px;padding:24px}h1{font-size:23px;margin:0 0 12px}p{color:#666;font-size:13px;line-height:1.6}label{display:block;font-weight:600;margin:12px 0 6px}input,button{font:inherit;width:100%;min-height:44px;border-radius:6px;padding:10px}input{border:1px solid #ddd}button{border:0;background:#168568;color:#fff;margin:12px 0 4px;font-weight:600}.secondary{background:#e9eeec;color:#333}.msg{color:#b52f3d}a{color:#2563b8;font-size:14px}</style></head><body><main><h1>管理员 · '+(session.quickLocked?'快捷解锁':'快捷解锁设置')+'</h1><p>仅当前已验证的登录会话有效；退出登录、会话过期或服务重启后仍需完整密码。</p><p class="msg" role="status">'+message+'</p>'+main+'<p>'+back+'</p><p>短数字码仅用于临时锁定，不替代账号密码。请勿在不可信设备或不安全网络上使用。</p></main></body></html>');
+}
+function quickDeviceRoute(req,res,url,token,session){
+  if(!session||session.until<=Date.now()||!isAdmin(session.user)){reply(res,403,{error:'仅已验证的管理员会话可使用'});return}
+  if(req.method==='GET'){quickPage(req,res,session);return}
+  if(req.method!=='POST'||req.headers['sec-fetch-site']==='cross-site'||!/^application\/x-www-form-urlencoded(?:;|$)/i.test(req.headers['content-type']||'')){reply(res,403,{error:'无效操作'});req.resume();return}
+  if(session.quickBusy){reply(res,429,{error:'操作处理中'});req.resume();return}
+  session.quickBusy=true;
+  let chunks=[],size=0,done=false;
+  const release=()=>{session.quickBusy=false};
+  const abort=()=>{if(!done){done=true;release()}};
+  req.setTimeout(10000,()=>{abort();req.destroy()});req.on('aborted',abort);req.on('error',abort);req.on('close',abort);
+  req.on('data',b=>{if(done)return;size+=b.length;if(size>4096){abort();req.destroy();return}chunks.push(b)});
+  req.on('end',async()=>{
+    if(done)return;done=true;
+    const live=()=>sessions.get(token)===session&&session.until>Date.now()&&isAdmin(session.user);
+    const redirect=loc=>{res.writeHead(303,{'Location':loc,'Cache-Control':'no-store'});res.end()};
+    const fail=msg=>quickPage(req,res,session,msg,400);
+    const revoke=()=>{sessions.delete(token);res.writeHead(303,{'Location':'/login','Cache-Control':'no-store','Set-Cookie':'pro_session='+cookieOptions(req)+'; Max-Age=0'});res.end()};
+    const miss=msg=>{session.quickFailures=(session.quickFailures||0)+1;if(session.quickFailures>=3)revoke();else fail(msg+'，剩余 '+(3-session.quickFailures)+' 次。')};
+    try{
+      if(!live()){revoke();return}
+      const p=new URLSearchParams(Buffer.concat(chunks).toString('utf8')),op=p.get('op'),pin=p.get('pin')||'';
+      if(!session.quickCsrf||p.get('csrf')!==session.quickCsrf){reply(res,403,{error:'无效请求'});return}
+      if(session.quickLocked){
+        if(op!=='unlock'){fail('请先解锁');return}
+        if(!quickPinMatches(token,pin,session.quickHash)){miss('快捷码错误');return}
+        session.quickLocked=false;session.quickFailures=0;session.quickCsrf=crypto.randomBytes(24).toString('hex');redirect('/');return;
+      }
+      if(op==='lock'){
+        if(!session.quickHash){fail('请先设置快捷码');return}
+        session.quickLocked=true;session.quickFailures=0;session.quickCsrf=crypto.randomBytes(24).toString('hex');redirect('/device-lock');return;
+      }
+      if(op==='remove'){delete session.quickHash;session.quickFailures=0;session.quickCsrf=crypto.randomBytes(24).toString('hex');redirect('/device-lock');return}
+      if(op!=='setup'||!/^[0-9]{1,8}$/.test(pin)){fail('快捷码须为1至8位数字');return}
+      const password=p.get('password')||'';
+      if(!password||Buffer.byteLength(password)>128){miss('完整密码错误');return}
+      const account=readAccount(session.user.username),candidate=await passwordHash(password,account.salt);
+      if(!live()||readAccount(session.user.username)?.hash!==account.hash){revoke();return}
+      if(!crypto.timingSafeEqual(candidate,Buffer.from(account.hash,'hex'))){miss('完整密码错误');return}
+      session.quickHash=quickPinHash(token,pin);session.quickFailures=0;session.quickLocked=true;session.quickCsrf=crypto.randomBytes(24).toString('hex');redirect('/device-lock');
+    }catch{if(!res.headersSent)reply(res,500,{error:'快捷解锁操作失败，请重新登录'})}
+    finally{release()}
+  });
+}
+
 function accessGate(req,res,url){
   const now=Date.now();for(const [t,s] of sessions)if(s.until<=now)sessions.delete(t);
-  const token=sessionToken(req),user=currentUser(req);
+  const token=sessionToken(req),user=currentUser(req),quickSession=token&&sessions.get(token);
+  if(url.pathname==='/device-lock'){quickDeviceRoute(req,res,url,token,quickSession);return false}
   if(req.method==='GET'&&url.pathname==='/api/pro2/health'&&!user){reply(res,200,{ok:true});return false}
   if(req.method==='POST'&&url.pathname==='/logout'){
     if(req.headers['sec-fetch-site']==='cross-site'){reply(res,403,{error:'无效请求'});return false}
@@ -826,6 +889,10 @@ function accessGate(req,res,url){
   }
   if(req.method==='GET'&&(url.pathname==='/register'||url.pathname==='/login')){
     loginPage(res,'',200,register,rememberedAccount(req));return false;
+  }
+  if(quickSession?.quickLocked){
+    if(req.method==='GET'&&(url.pathname==='/'||url.pathname==='/index.html')){quickPage(req,res,quickSession);return false}
+    reply(res,423,{error:'设备已锁定，请重新打开网站解锁'});return false;
   }
   if(user)return true;
   if(req.method==='GET'&&(url.pathname==='/'||url.pathname==='/index.html')){loginPage(res,'',200,false,rememberedAccount(req));return false}
@@ -1484,7 +1551,7 @@ const server=http.createServer((req,res)=>{
     if(e)return reply(res,404,{error:'Not Found'});
     if(filepath===path.join(PUBLIC,'index.html')){
       const user=currentUser(req);if(!user)return loginPage(res);
-      return reply(res,200,data.toString('utf8').replace('data-pro-account=""','data-pro-account="'+user.username+'"').replace('data-pro-admin="0"','data-pro-admin="'+(isAdmin(user)?'1':'0')+'"'),MIME['.html']);
+      return reply(res,200,data.toString('utf8').replace('data-pro-account=""','data-pro-account="'+user.username+'"').replace('data-pro-admin="0"','data-pro-admin="'+(isAdmin(user)?'1':'0')+'"').replace('<form class="me-logout"',isAdmin(user)?'<div style="padding:12px 16px;background:white;border-top:1px solid #eee"><a href="/device-lock" style="display:block;color:#168568;font-weight:600;text-decoration:none">管理员快捷解锁设置 / 锁定设备 ›</a></div><form class="me-logout"':'<form class="me-logout"'),MIME['.html']);
     }
     reply(res,200,data,MIME[path.extname(filepath)]||'application/octet-stream');
   });
