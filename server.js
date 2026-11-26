@@ -246,10 +246,104 @@ function openShortStudy(file){
 const shortStudy=openShortStudy(path.join(dataPath,'btc-short-observation-v1.json'));
 const signalLab=openSignalLab({file:path.join(dataPath,'swing-signal-lab-btc-v1.json'),log});
 const pro2Trades=createPro2Trades({markets:MARKETS,log,stopped:()=>stop,onTrade:(symbol,price,at,side,amount)=>{if(symbol==='BTCUSDT'){signalLab.trade(symbol,price,at);shortStudy.onTrade(symbol,price,at,side,amount)}}});
+
+// Retain observed SSR events, not future trade signals. The 60-second window
+// measures the outcome, rather than extending validity of the original rule.
+function createSwingFollow({initial=null,save=()=>{},now=Date.now,symbols=[],enabled=true,error=''}={}){
+  const duration=60000,gap=6000;
+  const fresh=()=>({version:1,startedAt:now(),items:{}});
+  const state=initial||fresh();
+  if(state.version!==1||!state.items||typeof state.items!=='object')throw Error('观察记录格式不兼容');
+  let alive=enabled&&!error,failure=error;
+  const pending=new Map();
+  function slot(symbol){return state.items[symbol]||(state.items[symbol]={active:null,history:[],seenAt:0,stats:{completed:0,interrupted:0,aligned:0,opposite:0,flat:0,kept:0,conditionLost:0,totalConfirmMs:0,totalConditionMs:0}})}
+  function persist(){if(!alive)return;try{save(state)}catch(e){alive=false;failure='观察记录保存失败：'+String(e.message||e).slice(0,100)}}
+  function finish(v,reason,t,price=null){
+    const p=v.active;if(!p)return;
+    const valid=reason==='complete'&&Number.isFinite(price)&&price>0;
+    const change=valid?100*(price/p.reference-1):null;
+    const signed=change===null?null:p.direction*change;
+    const elapsed=Math.max(0,Math.min(duration,(p.lastAt||p.confirmedAt)-p.confirmedAt));
+    const kept=valid&&!p.lostAt;
+    const conditionMs=Math.max(0,Math.min(duration,(p.lostAt||p.lastAt||p.confirmedAt)-p.confirmedAt));
+    const record={...p,endedAt:t,reason,change,signed,elapsedMs:elapsed,conditionMs,kept};
+    v.history.unshift(record);v.history=v.history.slice(0,100);v.active=null;
+    const st=v.stats;
+    if(valid){
+      st.completed++;st.totalConfirmMs+=Math.max(0,p.confirmedAt-p.firstAt);st.totalConditionMs+=conditionMs;
+      if(kept)st.kept++;else st.conditionLost++;
+      if(signed>.005)st.aligned++;else if(signed<-.005)st.opposite++;else st.flat++;
+    }else st.interrupted++;
+  }
+  if(alive){
+    let changed=false;
+    for(const symbol of symbols){const v=state.items[symbol];if(v?.active){finish(v,'restart',now());changed=true}}
+    if(changed)persist();
+  }
+  function observe(symbol,view,t=now()){
+    if(!alive||!symbols.includes(symbol))return;
+    const v=slot(symbol),p=v.active;
+    const at=view?.latestAt,price=view?.price;
+    const good=!!view?.ready&&Number.isFinite(at)&&at>0&&at<=t+1000&&t-at<=gap&&Number.isFinite(price)&&price>0;
+    const phase=view?.phase,code=phase?.code||'';
+    const observed=good&&/^(up|down)_(early|elapsed)$/.test(code)&&Number.isFinite(phase.turnAt)&&phase.turnAt<=at;
+    const direction=observed?(code.startsWith('up')?1:-1):0;
+    if(p){
+      if(!good){
+        pending.delete(symbol);
+        // A transient missing view is not a fabricated reversal. Only an
+        // actual sample gap invalidates the whole outcome.
+        if(t-p.lastAt>gap){finish(v,'gap',t);persist()}
+        return;
+      }
+      if(at<=p.lastAt)return;
+      if(at-p.lastAt>gap){finish(v,'gap',t);pending.delete(symbol);persist();return}
+      p.lastAt=at;p.lastPrice=price;
+      // Original classification may expire naturally. Track that loss of
+      // condition separately from the actually measured price outcome.
+      if(!p.lostAt&&(!observed||direction!==p.direction||phase.turnAt!==p.turnAt)){
+        p.lostAt=at;p.lossReason=observed&&direction!==p.direction?'原分类发生反向变化':'原分类条件不再满足';persist();
+      }
+      if(at>=p.confirmedAt+duration){finish(v,'complete',at,price);persist()}
+      return;
+    }
+    if(!observed){pending.delete(symbol);return}
+    if(phase.turnAt<=v.seenAt){pending.delete(symbol);return}
+    const c=pending.get(symbol);
+    // Two distinct public samples for stable display; not a new strategy.
+    if(!c||c.turnAt!==phase.turnAt||c.direction!==direction||at-c.lastAt>3000){
+      pending.set(symbol,{turnAt:phase.turnAt,direction,firstAt:at,lastAt:at});return;
+    }
+    if(at<=c.lastAt)return;
+    if(at-c.firstAt<1000)return;
+    v.seenAt=phase.turnAt;
+    v.active={direction,turnAt:phase.turnAt,firstAt:c.firstAt,confirmedAt:at,reference:price,lastPrice:price,lastAt:at,lostAt:null,lossReason:null};
+    pending.delete(symbol);persist();
+  }
+  function snapshot(symbol,t=now()){
+    if(!symbols.includes(symbol))return null;
+    const v=state.items[symbol],p=v?.active,c=pending.get(symbol);
+    const st=v?.stats||{completed:0,interrupted:0,aligned:0,opposite:0,flat:0,kept:0,conditionLost:0,totalConfirmMs:0,totalConditionMs:0};
+    const valid=alive&&p&&t-p.lastAt<=gap&&p.lastAt<=t+1000;
+    const history=v?.history||[];
+    return {enabled:alive,error:failure,stage:!alive?'paused':p?(valid?(p.lostAt?'lost':'observing'):'gap'):c&&t-c.lastAt<=gap?'checking':history.length?'reviewed':'waiting',durationSeconds:60,
+      active:p?{...p,elapsedSeconds:Math.max(0,Math.min(60,Math.floor((p.lastAt-p.confirmedAt)/1000)))}:null,
+      last:history[0]||null,history:history.slice(0,10),stats:{...st,meanConfirmMs:st.completed?st.totalConfirmMs/st.completed:null,meanConditionMs:st.completed?st.totalConditionMs/st.completed:null}};
+  }
+  return {observe,snapshot,flush:persist};
+}
+function openSwingFollow(file,symbols){
+  let initial=null,error='';
+  try{if(fs.existsSync(file))initial=JSON.parse(fs.readFileSync(file,'utf8'))}catch(e){error='已有观察记录无法读取'}
+  const save=state=>{fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+'.tmp';fs.writeFileSync(tmp,JSON.stringify(state),{mode:0o600});fs.renameSync(tmp,file)};
+  try{return createSwingFollow({initial,save,symbols,error})}catch(e){return createSwingFollow({symbols,enabled:false,error:'已有观察记录格式不兼容'})}
+}
+
+const swingFollow=openSwingFollow(path.join(dataPath,'ssr-follow-v1.json'),FIVE_SYMBOLS);
 let signalLabTimer=null;
 function scanSignalLab(){
   if(stop)return;
-  try{const now=Date.now();signalLab.sweep(now);shortStudy.scan(now);if(MARKETS.has('BTCUSDT'))signalLab.scan('BTCUSDT',pro2Trades.getSwing('BTCUSDT'),now)}
+  try{const now=Date.now();signalLab.sweep(now);shortStudy.scan(now);for(const symbol of FIVE_SYMBOLS){if(!MARKETS.has(symbol))continue;const view=pro2Trades.getSwing(symbol);swingFollow.observe(symbol,view,now);if(symbol==='BTCUSDT')signalLab.scan(symbol,view,now)}}
   catch(e){log('SIGNAL_LAB_SCAN '+String(e.message||e).slice(0,120))}
 }
 
@@ -1290,7 +1384,7 @@ const server=http.createServer((req,res)=>{
     const symbol=(url.searchParams.get('symbol')||'').toUpperCase();
     const m=MARKETS.get(symbol);if(!m)return reply(res,404,{error:'合约不可用'});
     if(!pro2Trades.watch(symbol))return reply(res,200,{version:'ssr-research-v1',symbol,ready:false,reason:'该合约暂无支持的公开主动成交流',periods:[]});
-    return reply(res,200,{...pro2Trades.getSwing(symbol),symbol,exchangeLabel:m.exchangeLabel,shortStudy:swingStudySummary(symbol,shortStudy)});
+    return reply(res,200,{...pro2Trades.getSwing(symbol),symbol,exchangeLabel:m.exchangeLabel,shortStudy:swingStudySummary(symbol,shortStudy),follow:swingFollow.snapshot(symbol)});
   }
   if(url.pathname==='/api/pro2/health')return reply(res,200,pro2.state());
   if(url.pathname==='/api/paper')return reply(res,200,paper.snapshot(Date.now()));
@@ -1314,7 +1408,7 @@ const server=http.createServer((req,res)=>{
   });
 });
 server.listen(PORT,'127.0.0.1',()=>{
-  pro2.start();pro2Trades.start();signalLab.flush();shortStudy.flush();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
+  pro2.start();pro2Trades.start();signalLab.flush();shortStudy.flush();swingFollow.flush();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
   log(`合约实时数据Pro v9代 本地运行: http://localhost:${PORT}`);
   if(ENABLE_LEGACY)stopPatternFeed=startPatternFeed({markets:MARKETS,json,binance:BINANCE,okx:OKX,
     okxWs:OKX_WS,stopped:()=>stop,log});
@@ -1326,7 +1420,7 @@ server.listen(PORT,'127.0.0.1',()=>{
 });
 function shutdown(){stop=true;clearInterval(binanceTimer);clearInterval(okxTimer);
   clearTimeout(saveTimer);persistSignals();reviewHistory.save();paper.save();
-  clearInterval(signalLabTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();signalLab.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
+  clearInterval(signalLabTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();signalLab.flush();swingFollow.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
   state.wsB?.close();
   server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),2000).unref();
 }
