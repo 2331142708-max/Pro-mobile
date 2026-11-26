@@ -494,7 +494,47 @@
     return '<section class="swing-card swing-history-prices"><div class="swing-stage-caption">已结束模拟 · 非当前下单价格</div><div class="swing-history-price-grid">'+cell('模拟参考价',last?.entry)+cell('止盈复核价',last?.reason==='tp'?last.exit:null)+cell('止损复核价',last?.reason==='sl'?last.exit:null)+'</div><p>'+ (last?esc(last.label)+' · '+stamp(last.exitAt)+' 已结束 · '+(last.reason==='tp'?'仅触及正向阈值':'仅触及反向阈值'):v.symbol!=='BTCUSDT'?'此合约暂无对应模拟记录':'暂无完整历史阈值记录')+'</p></section>';
   }
 
+
+  let swingFullView='overview',swingFullData=null;
+  function swingDashboard(v){
+    const d=v.horizonAudit,short=v.shortStudy,phase=v.ready?v.phase:null,code=phase?.code||'waiting',risk=v.risk||{};
+    const observed=/^(up|down)_(early|elapsed)$/.test(code);
+    const stage=observed?(code.startsWith('up')?'回升':'回落')+(code.endsWith('_early')?' · 已观察起步':' · 已发生变化'):code==='neutral'?'尚未确认转折':'等待有效样本';
+    const riskLabels={low:'已观测异常较少',medium:'中风险警示',high:'高风险警示',unknown:'风险未评估'};
+    const level=Object.hasOwn(riskLabels,risk.level)?risk.level:'unknown';
+    const riskNotes=(risk.checks||[]).filter(x=>x.level==='high'||x.level==='medium').slice(0,2).map(x=>esc(x.name)).join(' · ');
+    const f=v.follow,active=f?.active,elapsed=active?Math.max(0,Math.min(60,Number(active.elapsedSeconds)||0)):null;
+    const fLabels={paused:'已暂停',checking:'待确认',observing:'持续观察',lost:'原条件失效',gap:'数据中断',reviewed:'历史已复核',waiting:'等待转折'};
+    const definitions=[['ssr','原SSR'],['exhaustion','动能衰竭'],['failed_break','假突破回归'],['absorption','主动成交吸收'],['ofi','订单流失衡'],['vwap','VWAP均值回归']];
+    const fresh=!!(d?.enabled&&d.latestAt&&d.serverAt-d.latestAt<=6000&&d.latestAt<=d.serverAt+1000);
+    const pct=x=>Number.isFinite(x)?swingNum(x,2)+'%':'—';
+    const models=definitions.map(([key,name])=>{
+      const m=d?.models?.find(x=>x.code===key),sm=short?.models?.find(x=>x.code===key);
+      const last=sm?.lastCompleted;
+      const note=!d?'无独立样本':!d.enabled?'研究暂停':!fresh?'数据待更新':key==='ofi'&&!short?.bookFresh?'盘口待更新':last&&Number.isFinite(last.change)?'历史 '+esc(last.direction)+' · '+(last.change>.005?'同向':last.change<-.005?'反向':'平坦'):key==='ssr'?'独立历史复核':'样本未验证';
+      const cells=[2,3,4,5].map(minute=>{const w=m?.windows?.find(x=>x.minute===minute);
+        return '<td>'+(w?.n?'<b>'+esc(w.same)+'/'+esc(w.n)+'</b><small>'+pct(w.meanAdverse)+'</small>':'—')+'</td>';
+      }).join('');
+      return '<tr><th scope="row"><button type="button" data-swing-screen="models"><b>'+name+'</b><small>'+note+'</small></button></th>'+cells+'</tr>';
+    }).join('');
+    const periods=[1,3,5].map(minutes=>{const r=v.periods?.find(x=>x.minutes===minutes),ok=v.ready&&r?.ready;
+      return '<tr><th scope="row">'+minutes+'分</th><td>'+(ok?swingPct(r.change):'—')+'</td><td>'+(ok?swingPct(r.rebound):'—')+'</td><td>'+(ok?swingPct(r.pullback):'—')+'</td><td>'+(ok&&r.buyPct!=null?pct(r.buyPct):'—')+'</td></tr>';
+    }).join('');
+    const dLab=v.closedLab,guard=dLab?.lossGuard,last=(dLab?.history||[]).find(x=>Number.isFinite(x.entry)&&x.entry>0&&Number.isFinite(x.exit)&&x.exit>0&&['tp','sl'].includes(x.reason));
+    const priceCell=(label,x)=>'<div><small>'+label+'</small><b>'+ (Number.isFinite(x)&&x>0?price(x):'—')+'</b></div>';
+    const stamp=t=>Number.isFinite(t)&&t>0?new Date(t).toLocaleString('zh-CN',{hour12:false}):'—';
+    return '<div class="swing-dashboard">'+
+      '<section class="sd-quote"><div class="sd-quote-line"><span>'+esc(v.symbol||store.symbol)+' · 公开行情</span><strong id="swingLivePrice">—</strong></div><div id="swingQuoteStatus">等待独立公开报价</div></section>'+
+      '<section class="sd-box sd-historical"><button class="sd-section-title" type="button" data-swing-screen="prices">已结束模拟 · 历史价格 <span>详情 ›</span></button><div class="sd-prices">'+priceCell('模拟参考价',last?.entry)+priceCell('止盈复核价',last?.reason==='tp'?last.exit:null)+priceCell('止损复核价',last?.reason==='sl'?last.exit:null)+'</div><div class="sd-foot">'+(last?esc(last.label)+' · '+stamp(last.exitAt):'暂无对应历史记录')+(guard?.stoppedAt?' · 模拟已停止新增':'')+'</div></section>'+
+      '<div class="sd-state-grid"><button type="button" data-swing-screen="risk" class="sd-box sd-risk sd-risk-'+level+'"><small>已观测风险 ›</small><b>'+riskLabels[level]+'</b><small>'+ (riskNotes||'仅评估已观测项目')+'</small></button><button type="button" data-swing-screen="stage" class="sd-box sd-stage"><small>原SSR · 已发生阶段 ›</small><b>'+esc(stage)+'</b><small>前：未确认　中：'+(observed?'已观察':'未确认')+'　后：未确认</small></button></div>'+
+      '<button type="button" class="sd-box sd-follow" data-swing-screen="follow"><span>60秒追踪 · '+esc(fLabels[f?.stage]||'等待数据')+'</span><b>'+(elapsed===null?'—':elapsed+'/60秒')+' ›</b></button>'+
+      '<section class="sd-box sd-models"><button class="sd-section-title" type="button" data-swing-screen="models">六模型 · 2–5分钟历史复核 <span>详情 ›</span></button><div class="sd-foot">同向/完成笔数 · 下方小字为平均最大反向幅度</div><table class="sd-table"><thead><tr><th scope="col">模型</th><th scope="col">2分</th><th scope="col">3分</th><th scope="col">4分</th><th scope="col">5分</th></tr></thead><tbody>'+models+'</tbody></table></section>'+
+      '<section class="sd-box sd-periods"><button class="sd-section-title" type="button" data-swing-screen="periods">1 / 3 / 5分钟已发生变化 <span>详情 ›</span></button><table class="sd-table"><thead><tr><th scope="col">周期</th><th scope="col">涨跌</th><th scope="col">回升</th><th scope="col">回落</th><th scope="col">主动买</th></tr></thead><tbody>'+periods+'</tbody></table></section>'+
+      '<div class="sd-bottom"><span>只读研究 · 历史结果非交易信号</span><button type="button" data-swing-screen="history">历史区间 ›</button></div></div>';
+  }
+
   function swingRender(v){
+    swingFullData=v;
     const body=$('swingBody'),scroll=body.scrollTop,expanded=new Set([...body.querySelectorAll('details[open][data-swing-fold]')].map(x=>x.dataset.swingFold));
     const phase=v.ready?v.phase:null,code=phase?.code||'waiting';
     const observed=/^(up|down)_(early|elapsed)$/.test(code);
@@ -512,14 +552,21 @@
       return '<tr><td>'+minutes+'分钟</td><td>'+ (v.ready&&r?.ready?swingPct(r.change):'—')+'</td><td>'+(v.ready&&r?.ready?swingPct(r.rebound):'—')+'</td><td>'+(v.ready&&r?.ready?swingPct(r.pullback):'—')+'</td><td>'+(v.ready&&r?.ready&&r.buyPct!=null?swingNum(r.buyPct,1)+'%':'—')+'</td></tr>';
     }).join('');
     const blocks=v.ready&&v.blocks?.length?v.blocks.map(x=>'<div class="swing-history-row"><span>'+tm(x.from)+'–'+tm(x.to)+'</span><b>'+swingPct(x.change)+' / '+swingPct(x.range)+'</b></div>').join(''):'<p>连续样本不足</p>';
-    body.innerHTML='<div class="swing-kicker">'+esc(v.symbol||store.symbol)+' · '+esc(v.exchangeLabel||'')+' · 只读研究</div><div class="swing-price" id="swingLivePrice">—</div><p id="swingQuoteStatus">等待独立公开报价</p>'  +swingHistoricalPrices(v)+riskCard+swingClosedLab(v)+swingHorizonAudit(v)+stage+'<details class="swing-card" data-swing-fold="old-follow"><summary><b>原60秒观察及五模型历史复核</b><span class="swing-fold-hint">详情 ›</span></summary>'+swingFollowCard(v)+swingStudies(v)+'</details>'+'<details class="swing-card" data-swing-fold="periods"><summary><b>1 / 3 / 5分钟实际变化</b><span class="swing-fold-hint">详情 ›</span></summary><div class="swing-table-scroll"><table class="swing-mini-table"><thead><tr><th>周期</th><th>涨跌</th><th>回升</th><th>回落</th><th>主动买</th></tr></thead><tbody>'+rows+'</tbody></table></div></details><details class="swing-card" data-swing-fold="history"><summary><b>历史5分钟区间复核</b><span class="swing-fold-hint">详情 ›</span></summary><p>已发生区间涨跌 / 振幅</p>'+blocks+'</details><p class="swing-compact-note">公开成交采样 · 与2H主模型独立。不生成未来方向、入场指令或盈利概率。</p>';
+    const periodDetails='<section class="swing-card"><h3>1 / 3 / 5分钟实际变化</h3><div class="swing-table-scroll"><table class="swing-mini-table"><thead><tr><th>周期</th><th>涨跌</th><th>回升</th><th>回落</th><th>主动买</th></tr></thead><tbody>'+rows+'</tbody></table></div></section>';
+    const historyDetails='<section class="swing-card"><h3>历史5分钟区间复核</h3><p>已发生区间涨跌 / 振幅</p>'+blocks+'</section>';
+    const views={risk:riskCard,stage,follow:swingFollowCard(v),prices:swingHistoricalPrices(v)+swingClosedLab(v),models:swingHorizonAudit(v)+swingStudies(v),periods:periodDetails,history:historyDetails};
+    const main=swingFullView==='overview';
+    body.classList.toggle('sd-overview',main);
+    body.innerHTML=main?swingDashboard(v):'<button type="button" class="sd-back" data-swing-screen="overview">‹ 返回全屏总览</button>'+ (views[swingFullView]||views.models);
     for(const x of body.querySelectorAll('details[data-swing-fold]'))x.open=expanded.has(x.dataset.swingFold);
+    if(swingFullView==='risk'){const r=body.querySelector('details[data-swing-fold="risk"]');if(r)r.open=true;}
     body.scrollTop=scroll;renderSwingQuote();
   }
 
   async function refreshSwing(){if(!swingDialog.open||swingBusy)return;const generation=swingGeneration,symbol=store.symbol;swingBusy=true;
     try{const v=await get('/api/pro2/swing?symbol='+encodeURIComponent(symbol));if(swingDialog.open&&generation===swingGeneration&&symbol===store.symbol)swingRender(v)}catch{if(swingDialog.open&&generation===swingGeneration)swingRender({symbol,ready:false,reason:'数据接口暂不可用，停止统计'})}finally{swingBusy=false}}
-  $('swingOpen').addEventListener('click',()=>{if(swingDialog.open)return;swingGeneration++;swingRender({symbol:store.symbol,ready:false,reason:'等待真实成交'});swingQuote=null;swingDialog.showModal();void refreshSwingQuote();void refreshSwing();swingTimer=setInterval(refreshSwing,2000);quoteTimer=setInterval(refreshSwingQuote,500);quoteAgeTimer=setInterval(renderSwingQuote,250)});
+  $('swingBody').addEventListener('click',e=>{const btn=e.target.closest('[data-swing-screen]');if(!btn||!swingFullData)return;swingFullView=btn.dataset.swingScreen;swingRender(swingFullData);$('swingBody').scrollTop=0;});
+  $('swingOpen').addEventListener('click',()=>{if(swingDialog.open)return;swingFullView='overview';swingGeneration++;swingRender({symbol:store.symbol,ready:false,reason:'等待真实成交'});swingQuote=null;swingDialog.showModal();$('swingBody').scrollTop=0;void refreshSwingQuote();void refreshSwing();swingTimer=setInterval(refreshSwing,2000);quoteTimer=setInterval(refreshSwingQuote,500);quoteAgeTimer=setInterval(renderSwingQuote,250)});
   $('swingClose').addEventListener('click',()=>swingDialog.close());
   swingDialog.addEventListener('close',()=>{swingGeneration++;clearInterval(swingTimer);clearInterval(quoteTimer);clearInterval(quoteAgeTimer);swingTimer=null;quoteTimer=null;quoteAgeTimer=null;swingQuote=null});
 
