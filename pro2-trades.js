@@ -7,7 +7,7 @@ const BINANCE_MARKET_WS=process.env.PRO2_BINANCE_TRADES_WS||'wss://fstream.binan
 const OKX_PUBLIC_WS=process.env.PRO2_OKX_TRADES_WS||'wss://ws.okx.com/ws/v5/public';
 const floorHour=t=>Math.floor(t/HOUR)*HOUR;
 const safe=(v,n=0)=>Number.isFinite(+v)?+v:n;
-function createPro2Trades({markets,log=()=>{},stopped=()=>false}){
+function createPro2Trades({markets,log=()=>{},stopped=()=>false,onTrade=()=>{}}){
   const records=new Map(), observer=createObserver({markets}),lastSeen=new Map(),leases=new Map(),latestPrint=new Map();
   const errors={binance:'',okx:''}, reconnects={binance:0,okx:0};
   const connections={binanceBase:null,okxBase:null,binanceWatch:null,okxWatch:null};
@@ -32,6 +32,7 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false}){
     const previous=latestPrint.get(symbol);
     if(!previous||at>=previous.at)latestPrint.set(symbol,{price,at,receivedAt:now});
     observer.record(symbol,side,amount,price,at);
+    if(!previous||at>=previous.at)try{onTrade(symbol,price,at)}catch(e){log('SIGNAL_LAB_TRADE '+String(e.message||e).slice(0,120))}
     if(amount>=MILLION){
       const start=floorHour(at),old=records.get(symbol);
       const v=old?.start===start?old:{start,firstObservedAt:at,buy:0,sell:0,buyCount:0,sellCount:0};

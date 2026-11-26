@@ -32,7 +32,97 @@ const paper=createPaperTrader({file:path.join(dataPath,reverse?'paper-reverse-or
   stoppedAt:Number(process.env.CONTRACT_LENS_PAPER_STOPPED_AT)||0,reverse});
 const MARKETS=new Map();
 const pro2=createPro2({markets:MARKETS,json,binance:BINANCE,okx:OKX,log,stopped:()=>stop,dataDir:dataPath,allowedSymbols:FIVE_SYMBOLS});
-const pro2Trades=createPro2Trades({markets:MARKETS,log,stopped:()=>stop});
+
+/* Read-only BTCUSDT signal lab imported from the supplied component's source
+ * commit. Inlined to comply with the existing deployment file allowlist. */
+function createLab({initial=null,save=()=>{},now=Date.now,enabled=true,error=""}={}){
+  const config=Object.freeze({symbol:"BTCUSDT",capital:1000,margin:100,leverage:100,tp:13,sl:17,fee:0,maxGapMs:6000});
+  const labels={up_early:"回升起步",up_elapsed:"回升已发生",down_early:"回落起步",down_elapsed:"回落已发生"};
+  const codes=Object.keys(labels);
+  const fresh=()=>({version:1,startedAt:now(),accounts:Object.fromEntries(codes.map(code=>[code,{balance:1000,wins:0,losses:0,invalid:0,skipped:0,observedNet:0,peak:1000,maxDrawdown:0,bySymbol:{},positions:{},lastTurn:{}}])),history:[]});
+  const s=initial||fresh();
+  if(s.version!==1||!s.accounts||!Array.isArray(s.history)||codes.some(k=>!s.accounts[k]||!Number.isFinite(s.accounts[k].balance)||!s.accounts[k].positions||!s.accounts[k].lastTurn||!s.accounts[k].bySymbol))throw Error("模拟记录格式不兼容");
+  let failure=error,alive=enabled&&!error,latestAt=0;
+  const round=x=>Math.round(x*10000)/10000;
+  const used=a=>Object.values(a.positions).reduce((n,p)=>n+p.margin,0);
+  function persist(){if(!alive)return;try{save(s)}catch(e){failure="保存失败，已暂停模拟："+String(e.message||e).slice(0,120);alive=false}}
+  function stat(a,symbol){return a.bySymbol[symbol]||(a.bySymbol[symbol]={wins:0,losses:0,invalid:0,skipped:0,net:0,observedNet:0})}
+  function finish(code,symbol,p,at,reason,price=null,observed=null){
+    const a=s.accounts[code],b=stat(a,symbol);
+    const pnl=reason==="tp"?config.tp:reason==="sl"?-config.sl:0;
+    delete a.positions[symbol];
+    if(reason==="tp"){a.wins++;b.wins++}
+    else if(reason==="sl"){a.losses++;b.losses++}
+    else {a.invalid++;b.invalid++}
+    a.balance=round(a.balance+pnl);b.net=round(b.net+pnl);
+    if(observed!==null){a.observedNet=round(a.observedNet+observed);b.observedNet=round(b.observedNet+observed)}
+    a.peak=Math.max(a.peak,a.balance);a.maxDrawdown=Math.max(a.maxDrawdown,round(a.peak-a.balance));
+    s.history.unshift({code,label:labels[code],symbol,turnAt:p.turnAt,detectedAt:p.detectedAt,entryAt:p.entryAt??null,entry:p.entry??null,exitAt:at,exit:price,reason,pnl:reason==="tp"||reason==="sl"?pnl:null,observedPnl:observed});
+    if(s.history.length>2000)s.history.length=2000;
+  }
+  // A restart cannot recreate the unseen path. Never count an interrupted position as a winner.
+  if(alive){let changed=false;for(const code of codes)for(const [sym,p] of Object.entries(s.accounts[code].positions)){finish(code,sym,p,now(),"restart");changed=true}if(changed)persist()}
+  function scan(symbol,view,t=now()){
+    if(symbol!==config.symbol)return false;
+    if(!alive||!view?.ready||!Number.isFinite(view.latestAt)||t-view.latestAt>config.maxGapMs||view.latestAt>t+1000)return false;
+    const code=view.phase?.code,turn=view.phase?.turnAt;
+    if(!codes.includes(code)||!Number.isFinite(turn)||turn>view.latestAt||view.latestAt-turn>60000)return false;
+    const a=s.accounts[code];
+    if((a.lastTurn[symbol]??-Infinity)>=turn)return false;
+    a.lastTurn[symbol]=turn;
+    if(a.positions[symbol]||a.balance-used(a)<config.margin){a.skipped++;stat(a,symbol).skipped++;persist();return false}
+    // Reserve virtual margin and wait for the next fresh public trade, not a retrospectively selected price.
+    a.positions[symbol]={symbol,code,turnAt:turn,detectedAt:t,afterAt:view.latestAt,margin:config.margin,entry:null,lastAt:t};
+    persist();return true;
+  }
+  function trade(symbol,price,at,t=now()){
+    if(symbol!==config.symbol)return;
+    if(!alive||!Number.isFinite(price)||price<=0||!Number.isFinite(at)||t-at>config.maxGapMs||at>t+1000)return;
+    latestAt=Math.max(latestAt,at);let changed=false;
+    for(const code of codes){
+      const p=s.accounts[code].positions[symbol];if(!p)continue;
+      if(p.entry===null){
+        if(t-p.detectedAt>config.maxGapMs){finish(code,symbol,p,t,"gap");changed=true;continue}
+        if(at<p.afterAt||at<p.detectedAt-1000)continue;
+        p.entry=price;p.entryAt=at;p.lastAt=at;changed=true;continue;
+      }
+      if(at<p.lastAt)continue;
+      if(at-p.lastAt>config.maxGapMs){finish(code,symbol,p,t,"gap");changed=true;continue}
+      p.lastAt=at;
+      const raw=(code.startsWith("up")?1:-1)*(price/p.entry-1)*p.margin*config.leverage;
+      if(raw>=config.tp-1e-8||raw<=-config.sl+1e-8){finish(code,symbol,p,at,raw>0?"tp":"sl",price,round(raw));changed=true}
+    }
+    if(changed)persist();
+  }
+  function sweep(t=now()){
+    if(!alive)return;let changed=false;
+    for(const code of codes)for(const [sym,p] of Object.entries(s.accounts[code].positions))if(t-p.lastAt>config.maxGapMs){finish(code,sym,p,t,"gap");changed=true}
+    if(changed)persist();
+  }
+  function snapshot(t=now()){
+    return {version:"swing-signal-lab-btc-v1",symbol:config.symbol,config,startedAt:s.startedAt,serverAt:t,latestAt,enabled:alive,error:failure,
+      accounts:codes.map(code=>{const a=s.accounts[code],count=a.wins+a.losses;return {code,label:labels[code],balance:a.balance,net:round(a.balance-config.capital),reserved:used(a),active:Object.keys(a.positions).length,wins:a.wins,losses:a.losses,invalid:a.invalid,skipped:a.skipped,observedNet:a.observedNet,maxDrawdown:a.maxDrawdown,winRate:count?round(a.wins/count*100):null,bySymbol:a.bySymbol}}),
+      history:s.history.slice(0,100)};
+  }
+  return {scan,trade,sweep,snapshot,flush:persist};
+}
+
+function openSignalLab({file,log=()=>{}}){
+ let initial=null,error='';
+ try{if(fs.existsSync(file))initial=JSON.parse(fs.readFileSync(file,'utf8'))}catch(e){error='无法读取已有记录，已暂停：'+e.message;}
+ const save=state=>{fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+'.tmp';fs.writeFileSync(tmp,JSON.stringify(state));fs.renameSync(tmp,file)};
+ try{return createLab({initial,save,error})}catch(e){log('SIGNAL_LAB '+e.message);return createLab({enabled:false,error:'已有记录不兼容，已暂停：'+e.message})}
+}
+
+const signalLab=openSignalLab({file:path.join(dataPath,'swing-signal-lab-btc-v1.json'),log});
+const pro2Trades=createPro2Trades({markets:MARKETS,log,stopped:()=>stop,onTrade:(symbol,price,at)=>{if(symbol==='BTCUSDT')signalLab.trade(symbol,price,at)}});
+let signalLabTimer=null;
+function scanSignalLab(){
+  if(stop)return;
+  try{const now=Date.now();signalLab.sweep(now);if(MARKETS.has('BTCUSDT'))signalLab.scan('BTCUSDT',pro2Trades.getSwing('BTCUSDT'),now)}
+  catch(e){log('SIGNAL_LAB_SCAN '+String(e.message||e).slice(0,120))}
+}
+
 let stopPatternFeed;
 const state={startedAt:Date.now(),binance:{connected:false,rest:false,ws:false,at:0,error:''},
   okx:{connected:false,rest:false,ws:false,at:0,error:''},historyDone:0,historyTotal:0,
@@ -972,6 +1062,7 @@ const server=http.createServer((req,res)=>{
   if(simRoute(req,res,url))return;
   if(req.method!=='GET')return reply(res,405,{error:'只允许GET；无交易/下单API'});
   if(url.pathname==='/api/ui-error'){log('PRO_FRONTEND_ERROR '+(url.searchParams.get('message')||'unknown').slice(0,200));return reply(res,200,{ok:true})}
+  if(url.pathname==='/api/pro2/signal-lab')return reply(res,200,signalLab.snapshot());
   if(url.pathname==='/api/pro2/snapshot')return reply(res,200,pro2.snapshot(pro2Trades));
   if(url.pathname==='/api/pro2/flow-health')return reply(res,200,pro2Trades.health());
   if(url.pathname==='/api/pro2/detail'){
@@ -1018,7 +1109,7 @@ const server=http.createServer((req,res)=>{
   });
 });
 server.listen(PORT,'127.0.0.1',()=>{
-  pro2.start();pro2Trades.start();
+  pro2.start();pro2Trades.start();signalLab.flush();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
   log(`合约实时数据Pro v9代 本地运行: http://localhost:${PORT}`);
   if(ENABLE_LEGACY)stopPatternFeed=startPatternFeed({markets:MARKETS,json,binance:BINANCE,okx:OKX,
     okxWs:OKX_WS,stopped:()=>stop,log});
@@ -1030,7 +1121,7 @@ server.listen(PORT,'127.0.0.1',()=>{
 });
 function shutdown(){stop=true;clearInterval(binanceTimer);clearInterval(okxTimer);
   clearTimeout(saveTimer);persistSignals();reviewHistory.save();paper.save();
-  stopPatternFeed?.();pro2.stop();pro2Trades.stop();
+  clearInterval(signalLabTimer);signalLab.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
   state.wsB?.close();
   server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),2000).unref();
 }

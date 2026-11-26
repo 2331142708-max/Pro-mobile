@@ -147,6 +147,11 @@
 </style>
 <style id="practice-paused-style">#practicePanel,#practiceReview,#practiceAdminLink,#practiceDetailDialog{display:none!important}#practicePaused{display:none}.practice-paused{margin:16px 0;background:#fff;border:1px solid #e5e7eb;border-radius:8px;min-height:340px;padding:48px 20px;text-align:center;align-items:center;justify-content:center;flex-direction:column;gap:12px}.practice-paused svg{width:54px;height:54px;stroke:#9ca3af;fill:none;stroke-width:1.5}.practice-paused h2{font-size:21px;color:#222;margin:0}.practice-paused p{font-size:14px;color:#777;margin:0}.practice-paused button{border:0;border-radius:6px;background:#07a85b;color:white;padding:12px 40px;font-size:14px;margin-top:14px}body[data-pro-view="records"] #practicePaused{display:flex}body[data-pro-view="records"] .work-grid,body[data-pro-view="records"] .bottom-panels{display:none!important}@media(max-width:710px){.practice-paused{margin:0;min-height:calc(65dvh);border:0;border-radius:0}}</style>
 <style id="classic-fast-quote">.classic-live-quote{padding:8px 0 13px;border-bottom:1px solid #e1e6df;margin-bottom:12px}.classic-live-quote strong{display:block;font-size:30px;line-height:1.2;font-variant-numeric:tabular-nums;color:#263b33}.classic-live-quote div{color:#718078;font-size:11px;margin-top:5px;line-height:1.5}#classicFlowAge{font-size:11px;margin-bottom:6px;font-variant-numeric:tabular-nums}</style>
+
+<style id="signal-lab-integrated-style">
+#practicePaused{display:none!important}.signal-lab{display:none;margin:12px 0;padding:16px;background:#f6f8fc;color:#192331;border-radius:8px;min-width:0}.signal-lab h2{font-size:20px;margin:0 0 8px}.signal-lab h3{font-size:15px;margin:18px 0 10px}.signal-lab p{font-size:12px;line-height:1.65;color:#596575;margin:6px 0}.lab-header,.lab-card{border:1px solid #e0e6ee;border-radius:9px;background:#fff;padding:14px}.lab-header strong{font-size:14px}.lab-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.lab-card h4{font-size:15px;margin:0 0 10px}.lab-balance{font-size:23px;font-weight:700;font-variant-numeric:tabular-nums}.lab-row{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12px;padding:7px 0;border-top:1px solid #edf0f4}.lab-row span{color:#667282}.lab-row b{font-variant-numeric:tabular-nums;text-align:right}.lab-status{font-size:12px;line-height:1.5;color:#516072;padding:7px 0}.lab-table{overflow-x:auto;background:#fff;border:1px solid #e0e6ee;border-radius:8px}.lab-table table{width:100%;border-collapse:collapse;white-space:nowrap;font-size:12px}.lab-table th,.lab-table td{padding:10px;border-bottom:1px solid #e9edf3;text-align:left}.lab-table th{color:#667282;background:#f7f9fb}.lab-open{font-size:12px;color:#64748b}.lab-return{border:0;border-radius:5px;background:#e9edf2;color:#354151;padding:8px 13px;font-size:12px}.lab-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}body[data-pro-view="records"] .signal-lab{display:block}body[data-pro-view="records"] .share-circle{display:none!important}
+@media(max-width:710px){.signal-lab{margin:0;padding:15px 12px;border-radius:0}.lab-cards{grid-template-columns:1fr}.lab-card{padding:14px}.lab-row{font-size:13px}}
+</style>
 </head>
 <body data-pro-view="market">
 <div class="shell">
@@ -171,6 +176,17 @@
     <div class="notice" id="notice"><span class="notice-symbol">i</span><span id="noticeText">正在加载交易所2小时K线；行情不足时不发布方向信号。</span></div>
 
 
+
+<section id="signalLabPanel" class="signal-lab" aria-label="BTCUSDT 实时模拟研究">
+  <div class="lab-heading"><h2>实时模拟 · BTCUSDT</h2><button type="button" class="lab-return" id="signalLabReturn">返回行情</button></div>
+  <p>四种波段阶段的独立虚拟研究账本，仅统计已经发生的公开成交结果。不连接真实交易账户，不充值、不下单、不提现。</p>
+  <div class="lab-header"><strong>原模型假设：每类初始 1,000 U · 单样本 100 U · 假设 100× · 固定阈值 +13 / −17 U · 手续费 0</strong>
+  <p>理论余额按固定阈值计算，另列观测穿越价格的理论盈亏。未模拟真实强平、滑点、点差、手续费与资金费率，不代表可实现收益或交易建议。断流或重启样本作废，不计胜负。</p>
+  <div id="signalLabStatus" class="lab-status" role="status">等待接口…</div><p id="signalLabStarted" class="lab-open"></p></div>
+  <h3>四类独立研究结果</h3><div id="signalLabCards" class="lab-cards"><p>正在读取四类模型…</p></div>
+  <h3>最近完成的研究样本</h3><p>仅展示最近100条，累计统计独立保存。未完成、作废样本不计理论胜率。</p>
+  <div class="lab-table"><table><thead><tr><th>时间</th><th>阶段</th><th>合约</th><th>结果</th><th>理论盈亏 U</th><th>观测穿越盈亏 U</th></tr></thead><tbody id="signalLabRows"></tbody></table></div>
+</section>
 <section class="practice-paused" id="practicePaused" aria-label="暂停服务"><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="20"/><path d="M20 16v16M28 16v16" stroke-linecap="round" stroke-width="3"/></svg><h2>暂停服务</h2><p>请返回其他界面</p><button type="button" id="practiceReturn">返回行情</button></section>
 <section class="practice-panel" id="practicePanel" aria-label="实时模拟练习">
   <div class="practice-top"><h2>U本位行情 · 实时模拟</h2><span class="practice-label">虚拟练习 · 非币安官方</span></div>
@@ -865,6 +881,47 @@ if(admin){review.hidden=false;$('practiceAdminLink').hidden=false;$('practiceAdm
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){void refresh();void reviews()}});
 setInterval(()=>{if(active())void refresh();if(admin&&document.visibilityState==='visible')void reviews()},5000);
 void refresh();
+})();
+</script>
+
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id),status=$('signalLabStatus'),cards=$('signalLabCards'),rows=$('signalLabRows');
+const money=x=>typeof x==='number'&&Number.isFinite(x)?x.toFixed(2):'—',signed=x=>typeof x==='number'&&Number.isFinite(x)?(x>0?'+':'')+money(x):'—';
+const stamp=x=>Number.isFinite(x)&&x>0?new Date(x).toLocaleString('zh-CN',{hour12:false}):'—';
+const el=(tag,txt,cls)=>{const n=document.createElement(tag);if(txt!==undefined)n.textContent=txt;if(cls)n.className=cls;return n};
+function line(p,k,v){const r=el('div',undefined,'lab-row');r.append(el('span',k),el('b',v));p.append(r)}
+let busy=false;
+const active=()=>document.visibilityState==='visible'&&document.body.dataset.proView==='records';
+async function refresh(){
+  if(!active()||busy)return;busy=true;
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),6000);
+  try{
+    const r=await fetch('/api/pro2/signal-lab',{cache:'no-store',credentials:'same-origin',signal:controller.signal});
+    if(r.status===401){location.replace('/login');return}
+    if(!r.ok)throw Error('接口暂不可用');
+    const d=await r.json();if(!Array.isArray(d.accounts)||d.accounts.length!==4||!Array.isArray(d.history))throw Error('结果格式不正确');
+    status.textContent=!d.enabled?'已暂停：'+(d.error||'未启用'):d.latestAt&&d.serverAt-d.latestAt<=6000?'正在采集公开成交 · '+stamp(d.latestAt):'等待新鲜公开成交 · 无有效价格时不产生样本';
+    $('signalLabStarted').textContent='研究开始：'+stamp(d.startedAt)+' · 数据读取：'+stamp(d.serverAt);
+    cards.replaceChildren(...d.accounts.map(a=>{
+      const c=el('section',undefined,'lab-card');
+      c.append(el('h4',a.label),el('div',money(a.balance)+' U','lab-balance'));
+      line(c,'理论累计盈亏',signed(a.net)+' U');line(c,'触及止盈 / 止损',a.wins+' / '+a.losses);
+      line(c,'已完成样本',String(a.wins+a.losses));line(c,'理论胜率',a.winRate==null?'样本不足':money(a.winRate)+'%');
+      line(c,'进行中 / 占用虚拟保证金',a.active+' / '+money(a.reserved)+' U');line(c,'中断作废 / 跳过',a.invalid+' / '+a.skipped);
+      line(c,'最大已结算回撤',money(a.maxDrawdown)+' U');line(c,'穿越价格累计盈亏',signed(a.observedNet)+' U');return c;
+    }));
+    const names={tp:'触及止盈',sl:'触及止损',gap:'断流作废',restart:'重启作废'};
+    rows.replaceChildren(...d.history.map(h=>{const tr=el('tr');for(const x of [stamp(h.exitAt),h.label,h.symbol,names[h.reason]||h.reason,signed(h.pnl),signed(h.observedPnl)])tr.append(el('td',x));return tr}));
+    if(!d.history.length){const tr=el('tr'),td=el('td','暂无已完成的真实研究样本');td.colSpan=6;tr.append(td);rows.append(tr)}
+  }catch(e){status.textContent='接口暂不可用；以下如有记录为上次读取结果，不代表当前状态。'}
+  finally{clearTimeout(timer);busy=false}
+}
+$('signalLabReturn').onclick=()=>document.querySelector('[data-pro-tab="market"]').click();
+document.querySelector('[data-pro-tab="records"]').addEventListener('click',()=>{void refresh()});
+document.addEventListener('visibilitychange',()=>{if(active())void refresh()});
+setInterval(()=>{if(active())void refresh()},2000);
 })();
 </script>
 </body>
