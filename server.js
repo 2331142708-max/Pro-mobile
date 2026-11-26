@@ -117,7 +117,85 @@ function openSignalLab({file,log=()=>{}}){
 
 // Forward-only, unleveraged event study. Descriptive rules are research
 // assumptions, not validated entries. No orders, money, or account balance.
-function createShortStudy({initial=null,save=()=>{},now=Date.now,enabled=true,error=''}={}){
+
+// Fixed-horizon forward observational audit. No forecasts, leverage,
+// execution, position sizing or selection of an optimal trading horizon.
+function createHorizonAudit({initial=null,save=()=>{},now=Date.now,enabled=true,error=''}={}){
+  const labels={ssr:'原SSR',exhaustion:'动能衰竭',failed_break:'假突破回归',absorption:'主动成交吸收',ofi:'订单流失衡（近似）',vwap:'VWAP均值回归'};
+  const codes=Object.keys(labels),minutes=[2,3,4,5],gap=6000,flat=.005;
+  const empty=()=>({n:0,same:0,opposite:0,flat:0,interrupted:0,sum:0,adverse:0,held:0});
+  const fresh=()=>({version:1,startedAt:now(),models:Object.fromEntries(codes.map(k=>[k,{pending:null,lastEvent:0,skipped:0,windows:Object.fromEntries(minutes.map(m=>[m,empty()]))}])),history:[]});
+  const st=initial||fresh();
+  if(st.version!==1||!Array.isArray(st.history)||codes.some(k=>!st.models?.[k]||minutes.some(m=>!Number.isFinite(st.models[k].windows?.[m]?.n))))throw Error('周期复核记录不兼容');
+  let alive=enabled&&!error,failure=error,latestAt=0;
+  function persist(){if(!alive)return;try{save(st)}catch(e){alive=false;failure='保存失败，复核暂停：'+String(e.message||e).slice(0,100)}}
+  function record(k,m,p,reason,at,value=null){
+    const w=st.models[k].windows[m],valid=reason==='complete'&&Number.isFinite(value);
+    if(valid){
+      w.n++;w.sum+=value;w.adverse+=p.adverse;
+      if(value>flat)w.same++;else if(value< -flat)w.opposite++;else w.flat++;
+      if(value>flat&&p.adverse<=flat)w.held++;
+    }else w.interrupted++;
+    st.history.unshift({code:k,minutes:m,category:p.direction===1?'回升':'回落',endedAt:at,reason,change:valid?value:null,adverse:valid?p.adverse:null});
+    st.history=st.history.slice(0,300);
+  }
+  function invalidate(k,reason,t){
+    const model=st.models[k],p=model.pending;if(!p)return false;
+    for(const m of minutes)if(!p.done[m])record(k,m,p,reason,t);
+    model.pending=null;return true;
+  }
+  if(alive){let dirty=false;for(const k of codes)if(invalidate(k,'restart',now()))dirty=true;if(dirty)persist()}
+  function event(k,direction,sourceAt,t=now()){
+    if(!alive||!codes.includes(k)||![1,-1].includes(direction)||!Number.isFinite(sourceAt)||sourceAt<=0||sourceAt>t+1000||t-sourceAt>gap)return false;
+    const model=st.models[k];if(sourceAt<=model.lastEvent)return false;
+    model.lastEvent=sourceAt;
+    if(model.pending){model.skipped++;persist();return false}
+    // No retrospective fill. Reference is a subsequent real public print.
+    model.pending={direction,sourceAt,detectedAt:t,entryAt:null,reference:null,lastAt:null,adverse:0,done:{}};
+    persist();return true;
+  }
+  function trade(symbol,price,at,t=now()){
+    if(!alive||symbol!=='BTCUSDT'||!Number.isFinite(price)||price<=0||!Number.isFinite(at)||at<=0||at>t+1000||t-at>gap||at<latestAt)return;
+    latestAt=at;let changed=false;
+    for(const k of codes){
+      const model=st.models[k],p=model.pending;if(!p)continue;
+      if(p.entryAt===null){
+        if(t-p.detectedAt>gap){changed=invalidate(k,'gap',t)||changed;continue}
+        if(at<=p.sourceAt)continue;
+        p.entryAt=at;p.reference=price;p.lastAt=at;changed=true;continue;
+      }
+      if(at<p.lastAt)continue;
+      if(at-p.lastAt>gap){changed=invalidate(k,'gap',t)||changed;continue}
+      p.lastAt=at;
+      const value=p.direction*100*(price/p.reference-1);
+      p.adverse=Math.max(p.adverse,-value,0);
+      for(const m of minutes){
+        if(p.done[m]||at<p.entryAt+m*60000)continue;
+        record(k,m,p,'complete',at,value);p.done[m]=true;changed=true;
+      }
+      if(p.done[5])model.pending=null;
+    }
+    if(changed)persist();
+  }
+  function sweep(t=now()){
+    if(!alive)return;let changed=false;
+    for(const k of codes){const p=st.models[k].pending;if(p&&t-(p.lastAt??p.detectedAt)>gap)changed=invalidate(k,'gap',t)||changed}
+    if(changed)persist();
+  }
+  function snapshot(t=now()){
+    return {enabled:alive,error:failure,startedAt:st.startedAt,latestAt,serverAt:t,models:codes.map(code=>{const m=st.models[code];return {code,label:labels[code],skipped:m.skipped,pending:!!m.pending,windows:minutes.map(minute=>{const w=m.windows[minute];return {minute,n:w.n,same:w.same,opposite:w.opposite,flat:w.flat,interrupted:w.interrupted,mean:w.n?w.sum/w.n:null,meanAdverse:w.n?w.adverse/w.n:null,held:w.held}})}}),history:st.history.slice(0,24)};
+  }
+  return {event,trade,sweep,snapshot,flush:persist};
+}
+function openHorizonAudit(file){
+  let initial=null,error='';
+  try{if(fs.existsSync(file))initial=JSON.parse(fs.readFileSync(file,'utf8'))}catch(e){error='已有复核记录无法读取'}
+  const save=state=>{fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+'.tmp';fs.writeFileSync(tmp,JSON.stringify(state),{mode:0o600});fs.renameSync(tmp,file)};
+  try{return createHorizonAudit({initial,save,error})}catch(e){return createHorizonAudit({enabled:false,error:'复核记录格式不兼容'})}
+}
+
+const horizonAudit=openHorizonAudit(path.join(dataPath,'btc-horizon-audit-v1.json'));
+function createShortStudy({initial=null,save=()=>{},now=Date.now,enabled=true,error='',onEvent=()=>{}}={}){
   const definitions={
     exhaustion:{label:'动能衰竭反转',note:'比较连续价格变化、成交额和主动成交力量是否减弱'},
     failed_break:{label:'假突破回归',note:'观察前区间被突破后是否实际返回区间'},
@@ -222,7 +300,7 @@ function createShortStudy({initial=null,save=()=>{},now=Date.now,enabled=true,er
       if(!direction||direction===prev||m.pending||t-m.lastEventAt<horizon)continue;
       m.lastEventAt=t;
       m.pending={direction,regime,at:lastTrade.at,price:lastTrade.price,lastAt:lastTrade.at};
-      changed=true;
+      onEvent(k,direction,lastTrade.at,t);changed=true;
     }
     if(changed)persist();
   }
@@ -240,16 +318,16 @@ function openShortStudy(file){
   let initial=null,error='';
   try{if(fs.existsSync(file))initial=JSON.parse(fs.readFileSync(file,'utf8'))}catch(e){error='已有研究记录读取失败'}
   const save=state=>{fs.mkdirSync(path.dirname(file),{recursive:true});const temp=file+'.tmp';fs.writeFileSync(temp,JSON.stringify(state),{mode:0o600});fs.renameSync(temp,file)};
-  try{return createShortStudy({initial,save,error})}catch(e){return createShortStudy({enabled:false,error:'已有研究记录格式不兼容'})}
+  try{return createShortStudy({initial,save,error,onEvent:(k,d,at,t)=>horizonAudit.event(k,d,at,t)})}catch(e){return createShortStudy({enabled:false,error:'已有研究记录格式不兼容'})}
 }
 
 const shortStudy=openShortStudy(path.join(dataPath,'btc-short-observation-v1.json'));
 const signalLab=openSignalLab({file:path.join(dataPath,'swing-signal-lab-btc-v1.json'),log});
-const pro2Trades=createPro2Trades({markets:MARKETS,log,stopped:()=>stop,onTrade:(symbol,price,at,side,amount)=>{if(symbol==='BTCUSDT'){signalLab.trade(symbol,price,at);shortStudy.onTrade(symbol,price,at,side,amount)}}});
+const pro2Trades=createPro2Trades({markets:MARKETS,log,stopped:()=>stop,onTrade:(symbol,price,at,side,amount)=>{if(symbol==='BTCUSDT'){signalLab.trade(symbol,price,at);shortStudy.onTrade(symbol,price,at,side,amount);horizonAudit.trade(symbol,price,at)}}});
 
 // Retain observed SSR events, not future trade signals. The 60-second window
 // measures the outcome, rather than extending validity of the original rule.
-function createSwingFollow({initial=null,save=()=>{},now=Date.now,symbols=[],enabled=true,error=''}={}){
+function createSwingFollow({initial=null,save=()=>{},now=Date.now,symbols=[],enabled=true,error='',onEvent=()=>{}}={}){
   const duration=60000,gap=6000;
   const fresh=()=>({version:1,startedAt:now(),items:{}});
   const state=initial||fresh();
@@ -318,7 +396,7 @@ function createSwingFollow({initial=null,save=()=>{},now=Date.now,symbols=[],ena
     if(at-c.firstAt<1000)return;
     v.seenAt=phase.turnAt;
     v.active={direction,turnAt:phase.turnAt,firstAt:c.firstAt,confirmedAt:at,reference:price,lastPrice:price,lastAt:at,lostAt:null,lossReason:null};
-    pending.delete(symbol);persist();
+    pending.delete(symbol);persist();onEvent(symbol,direction,at,t);
   }
   function snapshot(symbol,t=now()){
     if(!symbols.includes(symbol))return null;
@@ -336,14 +414,14 @@ function openSwingFollow(file,symbols){
   let initial=null,error='';
   try{if(fs.existsSync(file))initial=JSON.parse(fs.readFileSync(file,'utf8'))}catch(e){error='已有观察记录无法读取'}
   const save=state=>{fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+'.tmp';fs.writeFileSync(tmp,JSON.stringify(state),{mode:0o600});fs.renameSync(tmp,file)};
-  try{return createSwingFollow({initial,save,symbols,error})}catch(e){return createSwingFollow({symbols,enabled:false,error:'已有观察记录格式不兼容'})}
+  try{return createSwingFollow({initial,save,symbols,error,onEvent:(symbol,d,at,t)=>{if(symbol==='BTCUSDT')horizonAudit.event('ssr',d,at,t)}})}catch(e){return createSwingFollow({symbols,enabled:false,error:'已有观察记录格式不兼容'})}
 }
 
 const swingFollow=openSwingFollow(path.join(dataPath,'ssr-follow-v1.json'),FIVE_SYMBOLS);
 let signalLabTimer=null;
 function scanSignalLab(){
   if(stop)return;
-  try{const now=Date.now();signalLab.sweep(now);shortStudy.scan(now);for(const symbol of FIVE_SYMBOLS){if(!MARKETS.has(symbol))continue;const view=pro2Trades.getSwing(symbol);swingFollow.observe(symbol,view,now);if(symbol==='BTCUSDT')signalLab.scan(symbol,view,now)}}
+  try{const now=Date.now();signalLab.sweep(now);horizonAudit.sweep(now);shortStudy.scan(now);for(const symbol of FIVE_SYMBOLS){if(!MARKETS.has(symbol))continue;const view=pro2Trades.getSwing(symbol);swingFollow.observe(symbol,view,now);if(symbol==='BTCUSDT')signalLab.scan(symbol,view,now)}}
   catch(e){log('SIGNAL_LAB_SCAN '+String(e.message||e).slice(0,120))}
 }
 
@@ -1384,7 +1462,7 @@ const server=http.createServer((req,res)=>{
     const symbol=(url.searchParams.get('symbol')||'').toUpperCase();
     const m=MARKETS.get(symbol);if(!m)return reply(res,404,{error:'合约不可用'});
     if(!pro2Trades.watch(symbol))return reply(res,200,{version:'ssr-research-v1',symbol,ready:false,reason:'该合约暂无支持的公开主动成交流',periods:[]});
-    return reply(res,200,{...pro2Trades.getSwing(symbol),symbol,exchangeLabel:m.exchangeLabel,shortStudy:swingStudySummary(symbol,shortStudy),follow:swingFollow.snapshot(symbol)});
+    return reply(res,200,{...pro2Trades.getSwing(symbol),symbol,exchangeLabel:m.exchangeLabel,shortStudy:swingStudySummary(symbol,shortStudy),follow:swingFollow.snapshot(symbol),horizonAudit:symbol==='BTCUSDT'?horizonAudit.snapshot():null});
   }
   if(url.pathname==='/api/pro2/health')return reply(res,200,pro2.state());
   if(url.pathname==='/api/paper')return reply(res,200,paper.snapshot(Date.now()));
@@ -1408,7 +1486,7 @@ const server=http.createServer((req,res)=>{
   });
 });
 server.listen(PORT,'127.0.0.1',()=>{
-  pro2.start();pro2Trades.start();signalLab.flush();shortStudy.flush();swingFollow.flush();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
+  pro2.start();pro2Trades.start();signalLab.flush();shortStudy.flush();swingFollow.flush();horizonAudit.flush();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
   log(`合约实时数据Pro v9代 本地运行: http://localhost:${PORT}`);
   if(ENABLE_LEGACY)stopPatternFeed=startPatternFeed({markets:MARKETS,json,binance:BINANCE,okx:OKX,
     okxWs:OKX_WS,stopped:()=>stop,log});
@@ -1420,7 +1498,7 @@ server.listen(PORT,'127.0.0.1',()=>{
 });
 function shutdown(){stop=true;clearInterval(binanceTimer);clearInterval(okxTimer);
   clearTimeout(saveTimer);persistSignals();reviewHistory.save();paper.save();
-  clearInterval(signalLabTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();signalLab.flush();swingFollow.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
+  clearInterval(signalLabTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();signalLab.flush();swingFollow.flush();horizonAudit.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
   state.wsB?.close();
   server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),2000).unref();
 }
