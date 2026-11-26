@@ -508,7 +508,10 @@
     const definitions=[['ssr','原SSR'],['exhaustion','动能衰竭'],['failed_break','假突破回归'],['absorption','主动成交吸收'],['ofi','订单流失衡'],['vwap','VWAP均值回归']];
     const fresh=!!(d?.enabled&&d.latestAt&&d.serverAt-d.latestAt<=6000&&d.latestAt<=d.serverAt+1000);
     const pct=x=>Number.isFinite(x)?swingNum(x,2)+'%':'—';
-    const historyTag=(label,color)=>'<span style="display:inline-block;vertical-align:baseline;white-space:nowrap;font-size:inherit;line-height:1.05;font-weight:600;color:'+color+';border:1px solid '+color+';border-radius:3px;padding:0 2px;">'+esc(label)+'</span>';
+    const historyTag=(label,color)=>{
+      const bg=({'#168568':'#dcf3e8','#c43d48':'#fce3e6','#2563b8':'#e0edff'})[color]||'#e9edf3';
+      return '<span style="display:inline-block;vertical-align:baseline;white-space:nowrap;font-size:inherit;line-height:1.15;font-weight:700;color:'+color+';background-color:'+bg+';border:1px solid '+color+';border-radius:4px;padding:0 3px;">'+esc(label)+'</span>';
+    };
     const models=definitions.map(([key,name])=>{
       const m=d?.models?.find(x=>x.code===key),sm=short?.models?.find(x=>x.code===key);
       const last=sm?.lastCompleted;
