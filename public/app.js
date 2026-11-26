@@ -570,12 +570,22 @@
     if(v?.symbol!=='BTCUSDT'||!Array.isArray(v.horizonAudit?.history))return null;
     return v.horizonAudit.history.reduce((n,r)=>r?.reason==='complete'&&r.minutes===2&&Number.isFinite(r.endedAt)&&r.endedAt>0&&r.endedAt<=v.horizonAudit.serverAt+1000?Math.max(n,r.endedAt):n,0);
   }
-  let reviewSound=false,reviewAudio=null,reviewSeen=null,reviewLastNotice=0;
+  let reviewSound=false,reviewAudio=null,reviewSeen=null,reviewLastNotice=0,reviewPulse=null;
   const reviewToggle=$('swingReviewSound'),reviewNotice=$('swingReviewNotice');
+  function clearReviewPulse(){if(reviewPulse){reviewPulse.remove();reviewPulse=null;}}
+  function showReviewPulse(){
+    clearReviewPulse();
+    if(!swingDialog.open||document.visibilityState!=='visible'||window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches)return;
+    const el=document.createElement('div');el.setAttribute('aria-hidden','true');
+    el.style.cssText='position:fixed;inset:0;pointer-events:none;z-index:2147483646;background:rgba(75,110,145,.045);box-shadow:inset 0 0 0 4px rgba(75,110,145,.18);opacity:0';
+    if(typeof el.animate!=='function')return;
+    swingDialog.appendChild(el);reviewPulse=el;
+    try{const animation=el.animate([{opacity:0},{opacity:1},{opacity:0}],{duration:1400,iterations:4,easing:'ease-in-out'});animation.onfinish=animation.oncancel=()=>{el.remove();if(reviewPulse===el)reviewPulse=null;};}catch{clearReviewPulse();}
+  }
   function paintReviewToggle(){reviewToggle.textContent=reviewSound?'提醒开':'提醒关';reviewToggle.setAttribute('aria-pressed',String(reviewSound));}
-  function resetReviewReminder(){reviewSound=false;reviewSeen=null;reviewLastNotice=0;reviewNotice.hidden=true;reviewNotice.textContent='';paintReviewToggle()}
+  function resetReviewReminder(){clearReviewPulse();reviewSound=false;reviewSeen=null;reviewLastNotice=0;reviewNotice.hidden=true;reviewNotice.textContent='';paintReviewToggle()}
   reviewToggle.addEventListener('click',async()=>{
-    if(reviewSound){reviewSound=false;reviewNotice.hidden=true;paintReviewToggle();return}
+    if(reviewSound){clearReviewPulse();reviewSound=false;reviewNotice.hidden=true;paintReviewToggle();return}
     const generation=swingGeneration;
     try{
       const Audio=window.AudioContext||window.webkitAudioContext;if(!Audio)throw Error('not supported');
@@ -583,7 +593,7 @@
       if(reviewAudio.state!=='running')await reviewAudio.resume();
       if(!swingDialog.open||generation!==swingGeneration)return;
       if(reviewAudio.state!=='running')throw Error('audio unavailable');
-      reviewSound=true;reviewSeen=completedReviewStamp(swingFullData);reviewNotice.textContent='已开启：2分钟复核完成时轻提示';reviewNotice.hidden=false;paintReviewToggle();
+      reviewSound=true;reviewSeen=completedReviewStamp(swingFullData);reviewNotice.textContent='已开启：2分钟复核完成时轻提示及4次柔和全屏提示';reviewNotice.hidden=false;paintReviewToggle();
     }catch{reviewSound=false;paintReviewToggle();reviewNotice.textContent='声音不可用，请重新点击开启';reviewNotice.hidden=false}
   });
   function reviewCompleted(v){
@@ -593,7 +603,7 @@
     if(!reviewSound||prev===null||latest<=prev||document.visibilityState!=='visible'||!swingDialog.open)return;
     const t=Date.now();
     if(t-reviewLastNotice<60000)return;
-    reviewLastNotice=t;reviewNotice.textContent='已有新的2分钟历史复核结果 · 非下单提示';reviewNotice.hidden=false;
+    reviewLastNotice=t;reviewNotice.textContent='已有新的2分钟历史复核结果 · 非下单提示';reviewNotice.hidden=false;showReviewPulse();
     if(reviewAudio?.state!=='running')return;
     try{
       const at=reviewAudio.currentTime,o=reviewAudio.createOscillator(),g=reviewAudio.createGain();
@@ -609,6 +619,6 @@
   $('swingClose').addEventListener('click',()=>swingDialog.close());
   swingDialog.addEventListener('close',()=>{resetReviewReminder();swingGeneration++;clearInterval(swingTimer);clearInterval(quoteTimer);clearInterval(quoteAgeTimer);swingTimer=null;quoteTimer=null;quoteAgeTimer=null;swingQuote=null});
 
-  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){if(swingDialog.open){void refreshSwingQuote();void refreshSwing()}if(store.classicOpen)void refreshClassicLive()}});
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='visible')clearReviewPulse();if(document.visibilityState==='visible'){if(swingDialog.open){void refreshSwingQuote();void refreshSwing()}if(store.classicOpen)void refreshClassicLive()}});
   void refresh();setInterval(refresh,9000);setInterval(()=>{if(store.snap&&Date.now()-store.lastDetail>=4700)void refreshDetail()},5000);
 })();
