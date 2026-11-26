@@ -508,10 +508,11 @@
     const definitions=[['ssr','原SSR'],['exhaustion','动能衰竭'],['failed_break','假突破回归'],['absorption','主动成交吸收'],['ofi','订单流失衡'],['vwap','VWAP均值回归']];
     const fresh=!!(d?.enabled&&d.latestAt&&d.serverAt-d.latestAt<=6000&&d.latestAt<=d.serverAt+1000);
     const pct=x=>Number.isFinite(x)?swingNum(x,2)+'%':'—';
+    const historyTag=(label,color)=>'<span style="display:inline-block;vertical-align:baseline;white-space:nowrap;font-size:inherit;line-height:1.05;font-weight:600;color:'+color+';border:1px solid '+color+';border-radius:3px;padding:0 2px;">'+esc(label)+'</span>';
     const models=definitions.map(([key,name])=>{
       const m=d?.models?.find(x=>x.code===key),sm=short?.models?.find(x=>x.code===key);
       const last=sm?.lastCompleted;
-      const note=!d?'无独立样本':!d.enabled?'研究暂停':!fresh?'数据待更新':key==='ofi'&&!short?.bookFresh?'盘口待更新':last&&Number.isFinite(last.change)?'历史 '+esc(last.direction==='回升'?'上升':last.direction==='回落'?'下降':last.direction)+' · '+(last.change>.005?'正确':last.change<-.005?'错误':'温和'):key==='ssr'?'独立历史复核':'样本未验证';
+      const note=!d?'无独立样本':!d.enabled?'研究暂停':!fresh?'数据待更新':key==='ofi'&&!short?.bookFresh?'盘口待更新':last&&Number.isFinite(last.change)?'历史 '+historyTag(last.direction==='回升'?'上升':last.direction==='回落'?'下降':last.direction,last.direction==='回升'?'#168568':last.direction==='回落'?'#c43d48':'#64748b')+' · '+(last.change>.005?historyTag('正确','#168568'):last.change<-.005?historyTag('错误','#c43d48'):historyTag('温和','#2563b8')):key==='ssr'?'独立历史复核':'样本未验证';
       const cells=[2,3,4,5].map(minute=>{const w=m?.windows?.find(x=>x.minute===minute);
         return '<td>'+(w?.n?'<b>'+esc(w.same)+'/'+esc(w.n)+'</b><small>'+pct(w.meanAdverse)+'</small>':'—')+'</td>';
       }).join('');
