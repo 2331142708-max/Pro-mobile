@@ -511,7 +511,7 @@
     const models=definitions.map(([key,name])=>{
       const m=d?.models?.find(x=>x.code===key),sm=short?.models?.find(x=>x.code===key);
       const last=sm?.lastCompleted;
-      const note=!d?'无独立样本':!d.enabled?'研究暂停':!fresh?'数据待更新':key==='ofi'&&!short?.bookFresh?'盘口待更新':last&&Number.isFinite(last.change)?'历史 '+esc(last.direction)+' · '+(last.change>.005?'同向':last.change<-.005?'反向':'平坦'):key==='ssr'?'独立历史复核':'样本未验证';
+      const note=!d?'无独立样本':!d.enabled?'研究暂停':!fresh?'数据待更新':key==='ofi'&&!short?.bookFresh?'盘口待更新':last&&Number.isFinite(last.change)?'历史 '+esc(last.direction==='回升'?'上升':last.direction==='回落'?'下降':last.direction)+' · '+(last.change>.005?'正确':last.change<-.005?'错误':'温和'):key==='ssr'?'独立历史复核':'样本未验证';
       const cells=[2,3,4,5].map(minute=>{const w=m?.windows?.find(x=>x.minute===minute);
         return '<td>'+(w?.n?'<b>'+esc(w.same)+'/'+esc(w.n)+'</b><small>'+pct(w.meanAdverse)+'</small>':'—')+'</td>';
       }).join('');
