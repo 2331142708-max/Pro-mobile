@@ -282,8 +282,8 @@
     </form></details>
     <details><summary>账号安全 · 修改密码</summary><form id="mePasswordForm" class="me-form">
       <label for="meOldPassword">当前密码</label><input id="meOldPassword" type="password" autocomplete="current-password" required maxlength="128">
-      <label for="meNewPassword">新密码</label><input id="meNewPassword" type="password" autocomplete="new-password" minlength="10" maxlength="128" required>
-      <label for="meConfirmPassword">确认新密码</label><input id="meConfirmPassword" type="password" autocomplete="new-password" minlength="10" maxlength="128" required>
+      <label for="meNewPassword">新密码</label><input id="meNewPassword" type="password" autocomplete="new-password" minlength="4" maxlength="128" required>
+      <label for="meConfirmPassword">确认新密码</label><input id="meConfirmPassword" type="password" autocomplete="new-password" minlength="4" maxlength="128" required>
       <button type="submit" class="me-save" id="mePasswordSave">修改密码</button><p class="me-message" id="mePasswordMessage" role="status"></p>
     </form></details>
     <div class="me-note">合约实时数据Pro v9代 · 南柯一梦制作</div>
@@ -416,6 +416,9 @@ $('meProfileForm').onsubmit=async e=>{
   try{const u=await api('/api/account/profile',{method:'POST',headers:{'Content-Type':'application/json','X-Pro-Account':'1'},body:JSON.stringify(data)});drawMe(u);$('meProfileMessage').textContent='个人资料已保存。';}
   catch(e){$('meProfileMessage').textContent=e.message}finally{profileBusy=false;$('meProfileSave').disabled=false;$('meAvatarFile').disabled=false;$('meAvatarRemove').disabled=false}
 };
+const passwordMin=document.documentElement.dataset.proAdmin==='1'?10:4;
+$('meNewPassword').minLength=passwordMin;$('meConfirmPassword').minLength=passwordMin;
+$('meNewPassword').placeholder='至少'+passwordMin+'位，建议更长';$('meConfirmPassword').placeholder='再次输入新密码';
 $('mePasswordForm').onsubmit=async e=>{
   e.preventDefault();const b=$('mePasswordSave'),msg=$('mePasswordMessage');if(b.disabled)return;
   b.disabled=true;

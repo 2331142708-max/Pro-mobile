@@ -703,6 +703,19 @@ const SESSION_TTL=12*60*60*1000;
 const sessions=new Map();
 const USER_RE=/^[a-z0-9_]{3,24}$/;
 let failures=[],pendingLogins=0;
+const accountLoginAttempts=new Map();
+const ACCOUNT_LOGIN_WINDOW=30*60*1000;
+function reserveAccountLogin(name,now=Date.now()){
+  for(const [key,list] of accountLoginAttempts){
+    const recent=list.filter(t=>t>now-ACCOUNT_LOGIN_WINDOW);
+    if(recent.length)accountLoginAttempts.set(key,recent);else accountLoginAttempts.delete(key);
+  }
+  const attempts=accountLoginAttempts.get(name)||[];
+  if(attempts.length>=5)return false;
+  attempts.push(now);accountLoginAttempts.set(name,attempts);return true;
+}
+function minimumPasswordLength(account){return isOwnerAccount(account)?10:4;}
+
 const digest=v=>crypto.createHash('sha256').update(v).digest();
 function readAccessCode(){
   try{const v=fs.readFileSync(ACCESS_FILE,'utf8').trim();return v.length>=8&&Buffer.byteLength(v)<=128?v:null}catch{return null}
@@ -748,8 +761,8 @@ function loginPage(res,message='',status=200,register=false,remembered=''){
   const remember=register?'':'<label class="remember"><input type="checkbox" name="remember" value="1" '+(saved?'checked':'')+'>记住账号密码（保持登录7天）</label><p class="remember-note">密码由浏览器密码管理器保存，仅在自己的设备上勾选。</p>';
   const fields=register?'<label for="nickname">昵称</label><input id="nickname" name="nickname" required maxlength="24" autocomplete="nickname" placeholder="分享圈显示的名字">':'';
   const invite=register?'<label for="invite">注册邀请码</label><input id="invite" name="invite" type="password" required maxlength="128" autocomplete="off" placeholder="原网站登录码">':'';
-  const confirm=register?'<label for="confirm">确认密码</label><input id="confirm" name="confirm" type="password" required minlength="10" maxlength="128" autocomplete="new-password">':'';
-  const html='<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>合约实时数据Pro v9代 '+(register?'注册':'登录')+'</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#ededed;color:#171717;font:16px system-ui,sans-serif;padding:20px}main{width:100%;max-width:390px;background:white;padding:28px;border-radius:12px}h1{font-size:26px;margin:0 0 7px}p{font-size:13px;color:#666;line-height:1.6}label{display:block;font-size:14px;font-weight:600;margin:16px 0 7px}input,button{width:100%;min-height:46px;font:inherit;border-radius:6px;padding:10px}input{border:1px solid #ddd;background:#fafafa}button{background:#07a85b;color:white;border:0;margin-top:20px;font-weight:700}a{color:#087a42}.msg{color:#aa3030}.warn{color:#8a5c17}.remember{display:flex;align-items:center;gap:8px;font-weight:500;margin:16px 0 4px;color:#333}.remember input{width:18px;height:18px;min-height:0;margin:0;padding:0;accent-color:#07a85b}.remember-note{font-size:11px;margin:4px 0;color:#777}</style></head><body><main><h1>合约实时数据Pro v9代 · '+(register?'注册':'登录')+'</h1><p>南柯一梦制作 · 私人观察台</p><form method="post" action="'+(register?'/register':'/login')+'"><label for="username">账号</label><input id="username" name="username" required minlength="3" maxlength="24" autocomplete="username" value="'+(register?'':saved)+'" autocapitalize="none" spellcheck="false" placeholder="3–24位字母、数字或下划线">'+fields+'<label for="password">密码</label><input id="password" name="password" type="password" required maxlength="128" '+(register?'minlength="10" autocomplete="new-password" placeholder="至少10位，不要使用其他账号的密码"':'autocomplete="current-password"')+'>'+confirm+invite+remember+'<button type="submit">'+(register?'注册并登录':'登录')+'</button></form><p class="msg" role="status">'+message+'</p><p>'+(register?'已有账号？ <a href="/login">返回登录</a>':'没有账号？ <a href="/register">立即注册</a>')+'</p><p class="warn">如浏览器显示连接不安全，密码及内容可能被网络窃听。请使用本站专属密码，不要上传敏感信息。</p></main></body></html>';
+  const confirm=register?'<label for="confirm">确认密码</label><input id="confirm" name="confirm" type="password" required minlength="4" maxlength="128" autocomplete="new-password">':'';
+  const html='<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>合约实时数据Pro v9代 '+(register?'注册':'登录')+'</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#ededed;color:#171717;font:16px system-ui,sans-serif;padding:20px}main{width:100%;max-width:390px;background:white;padding:28px;border-radius:12px}h1{font-size:26px;margin:0 0 7px}p{font-size:13px;color:#666;line-height:1.6}label{display:block;font-size:14px;font-weight:600;margin:16px 0 7px}input,button{width:100%;min-height:46px;font:inherit;border-radius:6px;padding:10px}input{border:1px solid #ddd;background:#fafafa}button{background:#07a85b;color:white;border:0;margin-top:20px;font-weight:700}a{color:#087a42}.msg{color:#aa3030}.warn{color:#8a5c17}.remember{display:flex;align-items:center;gap:8px;font-weight:500;margin:16px 0 4px;color:#333}.remember input{width:18px;height:18px;min-height:0;margin:0;padding:0;accent-color:#07a85b}.remember-note{font-size:11px;margin:4px 0;color:#777}</style></head><body><main><h1>合约实时数据Pro v9代 · '+(register?'注册':'登录')+'</h1><p>南柯一梦制作 · 私人观察台</p><form method="post" action="'+(register?'/register':'/login')+'"><label for="username">账号</label><input id="username" name="username" required minlength="3" maxlength="24" autocomplete="username" value="'+(register?'':saved)+'" autocapitalize="none" spellcheck="false" placeholder="3–24位字母、数字或下划线">'+fields+'<label for="password">密码</label><input id="password" name="password" type="password" required maxlength="128" '+(register?'minlength="4" autocomplete="new-password" placeholder="至少4位，建议使用更长的专属密码"':'autocomplete="current-password"')+'>'+confirm+invite+remember+'<button type="submit">'+(register?'注册并登录':'登录')+'</button></form><p class="msg" role="status">'+message+'</p><p>普通用户密码最低4位，老用户仍使用原密码，可在「我」中自行修改。建议使用更长的密码。</p><p>'+(register?'已有账号？ <a href="/login">返回登录</a>':'没有账号？ <a href="/register">立即注册</a>')+'</p><p class="warn">如浏览器显示连接不安全，密码及内容可能被网络窃听。请使用本站专属密码，不要上传敏感信息。</p></main></body></html>';
   res.writeHead(status,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"});
   res.end(html);
 }
@@ -867,7 +880,7 @@ function accessGate(req,res,url){
         if(register){
           const nickname=(p.get('nickname')||'').trim(),invite=readAccessCode();
           if(!invite||!crypto.timingSafeEqual(digest(invite),digest(p.get('invite')||''))){reject('注册邀请码不正确。',403);return}
-          if(!nickname||nickname.length>24||/[\x00-\x1f\x7f]/.test(nickname)||password.length<10||password!==p.get('confirm')){reject('请填写有效昵称，密码至少10位且两次一致。');return}
+          if(!nickname||nickname.length>24||/[\x00-\x1f\x7f]/.test(nickname)||password.length<minimumPasswordLength(null)||password!==p.get('confirm')){reject('请填写有效昵称，密码至少4位且两次一致。');return}
           if(readAccount(name)){reject('账号已存在，请换一个。',409);return}
           const salt=crypto.randomBytes(16).toString('hex'),hash=(await passwordHash(password,salt)).toString('hex');
           if(res.destroyed)return;
@@ -875,6 +888,7 @@ function accessGate(req,res,url){
           try{saveAccount(account)}catch(e){if(e.code==='EEXIST'){reject('账号已存在，请换一个。',409);return}throw e}
         }else{
           account=readAccount(name);
+          if(account&&!reserveAccountLogin(name)){loginPage(res,'登录尝试过多，请在30分钟内稍后重试。',429,false);return}
           const candidate=await passwordHash(password,account?.salt||'00000000000000000000000000000000');
           if(!account||!crypto.timingSafeEqual(candidate,Buffer.from(account.hash,'hex'))){reject('账号或密码错误。',401);return}
         }
@@ -882,6 +896,7 @@ function accessGate(req,res,url){
         if(!latest||latest.hash!==account.hash){reject('账号状态已改变，请重新登录。',409);return}
         const wait=remainingRestriction(latest);
         if(wait){if(!res.destroyed)loginPage(res,'账号暂时限制登录，请在 '+wait+' 秒后重试。',423,false);return}
+        if(!register)accountLoginAttempts.delete(name);
         if(!res.destroyed)startSession(req,res,latest,!register&&p.get('remember')==='1');
       }catch(e){log('ACCOUNT_ERROR '+String(e.code||'internal'));if(!res.destroyed)loginPage(res,'账号操作失败，请稍后重试。',500,register)}
       finally{release()}
@@ -1039,7 +1054,7 @@ function accountRoute(req,res,url){
           reply(res,200,accountPublic(fresh));return;
         }
         const {oldPassword,newPassword,confirm}=body;
-        if(typeof oldPassword!=='string'||typeof newPassword!=='string'||Buffer.byteLength(oldPassword)>128||Buffer.byteLength(newPassword)>128||newPassword.length<10||newPassword!==confirm||oldPassword===newPassword){fail(400,'新密码至少10位，两次输入一致，且不同于旧密码');return}
+        if(typeof oldPassword!=='string'||typeof newPassword!=='string'||Buffer.byteLength(oldPassword)>128||Buffer.byteLength(newPassword)>128||newPassword.length<minimumPasswordLength(fresh)||newPassword!==confirm||oldPassword===newPassword){fail(400,'新密码至少'+minimumPasswordLength(fresh)+'位，两次输入一致，且不同于旧密码');return}
         const now=Date.now(),attempts=(profileFailures.get(user.username)||[]).filter(t=>t>now-5*60*1000);
         if(attempts.length>=5){fail(429,'旧密码尝试过多，五分钟后再试');return}
         attempts.push(now);profileFailures.set(user.username,attempts);
