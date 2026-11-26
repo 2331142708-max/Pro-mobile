@@ -573,11 +573,39 @@
   }
 
 
-  // Optional quiet reminder for completed two-minute research records only.
-  // Never reacts to a live direction, a candidate event or a quotation.
+  // Reminders cover completed historical records only, not live quotes or signals.
   function completedReviewStamp(v){
-    if(v?.symbol!=='BTCUSDT'||!Array.isArray(v.horizonAudit?.history))return null;
-    return v.horizonAudit.history.reduce((n,r)=>r?.reason==='complete'&&r.minutes===2&&Number.isFinite(r.endedAt)&&r.endedAt>0&&r.endedAt<=v.horizonAudit.serverAt+1000?Math.max(n,r.endedAt):n,0);
+    if(v?.symbol!=='BTCUSDT')return null;
+    const marks={};
+    const names={ssr:'原SSR',exhaustion:'动能衰竭',failed_break:'假突破回归',absorption:'主动成交吸收',ofi:'订单流失衡',vwap:'VWAP均值回归'};
+    const lab=v.closedLab?.history;
+    if(Array.isArray(lab)){
+      const x=lab.find(x=>Number.isFinite(x.entry)&&x.entry>0&&Number.isFinite(x.exit)&&x.exit>0&&['tp','sl'].includes(x.reason));
+      marks.prices={at:Number.isFinite(x?.exitAt)?x.exitAt:0,value:x?JSON.stringify([x.entry,x.exit,x.reason]):'',label:'历史模拟价格'};
+    }
+    for(const m of v.shortStudy?.models||[]){
+      if(!Object.hasOwn(names,m.code))continue;
+      const at=m.lastCompleted?.endAt??m.lastCompletedAt;
+      marks['short:'+m.code]={at:Number.isFinite(at)?at:0,label:names[m.code]};
+    }
+    for(const m of v.horizonAudit?.models||[]){
+      if(!Object.hasOwn(names,m.code))continue;
+      for(const w of m.windows||[]){
+        if([2,3,4,5].includes(w.minute)&&Number.isFinite(w.n))marks['window:'+m.code+':'+w.minute]={at:w.n,label:names[m.code]};
+      }
+    }
+    const f=v.follow;
+    if(f&&Number.isFinite(f.stats?.completed))marks.ssr={at:f.stats.completed,label:names.ssr};
+    return Object.keys(marks).length?marks:null;
+  }
+  function compareCompletedReviews(previous,current){
+    const next={...(previous||{})},changed=new Set();
+    for(const [key,value] of Object.entries(current||{})){
+      const old=next[key];
+      if(old&&(value.at>old.at||(key==='prices'&&value.at>0&&value.at===old.at&&value.value!==old.value)))changed.add(value.label);
+      if(!old||value.at>=old.at)next[key]=value;
+    }
+    return {next,changed:[...changed]};
   }
   let reviewSound=false,reviewAudio=null,reviewSeen=null,reviewLastNotice=0,reviewPulse=null,reviewToneTimers=[];
   const reviewToggle=$('swingReviewSound'),reviewNotice=$('swingReviewNotice');
@@ -602,17 +630,19 @@
       if(reviewAudio.state!=='running')await reviewAudio.resume();
       if(!swingDialog.open||generation!==swingGeneration)return;
       if(reviewAudio.state!=='running')throw Error('audio unavailable');
-      reviewSound=true;reviewSeen=completedReviewStamp(swingFullData);reviewNotice.textContent='已开启：2分钟复核完成时4次柔和全屏提示及同步轻提示音';reviewNotice.hidden=false;paintReviewToggle();
+      reviewSound=true;reviewSeen=completedReviewStamp(swingFullData);reviewNotice.textContent='已开启：历史模拟价格及六模型完成结果更新提醒（每分钟合并声音）';reviewNotice.hidden=false;paintReviewToggle();
     }catch{reviewSound=false;paintReviewToggle();reviewNotice.textContent='声音不可用，请重新点击开启';reviewNotice.hidden=false}
   });
   function reviewCompleted(v){
     const latest=completedReviewStamp(v);
     if(latest===null)return;
-    const prev=reviewSeen;reviewSeen=prev===null?latest:Math.max(prev,latest);
-    if(!reviewSound||prev===null||latest<=prev||document.visibilityState!=='visible'||!swingDialog.open)return;
+    const {next,changed}=compareCompletedReviews(reviewSeen,latest);
+    reviewSeen=next;
+    if(!reviewSound||!changed.length||document.visibilityState!=='visible'||!swingDialog.open)return;
     const t=Date.now();
+    reviewNotice.textContent='历史结果更新：'+changed.join('、')+' · 非下单提示';reviewNotice.hidden=false;
     if(t-reviewLastNotice<60000)return;
-    reviewLastNotice=t;reviewNotice.textContent='已有新的2分钟历史复核结果 · 非下单提示';reviewNotice.hidden=false;
+    reviewLastNotice=t;
     if(showReviewPulse()){
       for(let i=0;i<4;i++)reviewToneTimers.push(setTimeout(playReviewTone,700+i*1400));
     }else{playReviewTone();}
