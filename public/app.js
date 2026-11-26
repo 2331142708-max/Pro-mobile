@@ -474,6 +474,17 @@
     return '<section class="swing-card"><h3>2—5分钟 · 实际延续复核</h3><p>'+(!d.enabled?'复核已暂停：'+esc(d.error||'未启用'):recent?'公开成交持续采集':'等待有效成交')+' · '+stamp(d.latestAt)+'</p><p>六类研究同时采用固定2、3、4、5分钟窗口，不用事后最有利的价格选周期。</p>'+rows+'<p>未明显反向：已完成窗口内反向位移不超过0.005%，且结束时同向位移超过0.005%。这是研究统计，不表示下一次走势或预计结束时间。</p></section>';
   }
 
+
+  function swingClosedLab(v){
+    const d=v.closedLab,guard=d?.lossGuard;
+    if(!d)return '<section class="swing-card"><h3>模拟阈值 · 历史复核</h3><p>仅 BTCUSDT 四类原模型的已完成样本。</p></section>';
+    const signed=x=>Number.isFinite(x)?(x>0?'+':'')+x.toFixed(2)+' U':'—';
+    const stamp=t=>Number.isFinite(t)?new Date(t).toLocaleTimeString('zh-CN',{hour12:false}):'—';
+    const rows=(d.history||[]).map(x=>'<div class="swing-closed-row"><div><b>'+esc(x.label)+'</b><small>'+stamp(x.exitAt)+' · 已完成 · '+(x.reason==='tp'?'历史正阈值触及':'历史负阈值触及')+'</small></div><div class="swing-closed-prices"><span>历史参考价<strong>'+price(x.entry)+'</strong></span><span>实际结束价<strong>'+price(x.exit)+'</strong></span><span>观测理论结果<strong>'+signed(x.observedPnl)+'</strong></span></div></div>').join('');
+    const state=!d.enabled?'模拟数据暂不可用':guard?.stoppedAt?'模拟累计净亏损达到上限 · 已停止新增':'仅后台模拟研究';
+    return '<section class="swing-card"><h3>模拟止盈止损 · 历史复核</h3><p><b>'+esc(state)+'</b></p>'+(guard?'<p>四账本累计理论净盈亏 '+signed(guard.net)+' · 模拟停止上限 '+esc(guard.limit)+' U</p>':'')+(rows?rows:'<p>暂无完整阈值触及记录</p>')+'<p>仅显示已经结束的研究记录，不生成当前进场、止盈或止损指令。理论结果未计实际费用、滑点及强平。</p></section>';
+  }
+
   function swingRender(v){
     const body=$('swingBody'),scroll=body.scrollTop,expanded=new Set([...body.querySelectorAll('details[open][data-swing-fold]')].map(x=>x.dataset.swingFold));
     const phase=v.ready?v.phase:null,code=phase?.code||'waiting';
@@ -492,7 +503,7 @@
       return '<tr><td>'+minutes+'分钟</td><td>'+ (v.ready&&r?.ready?swingPct(r.change):'—')+'</td><td>'+(v.ready&&r?.ready?swingPct(r.rebound):'—')+'</td><td>'+(v.ready&&r?.ready?swingPct(r.pullback):'—')+'</td><td>'+(v.ready&&r?.ready&&r.buyPct!=null?swingNum(r.buyPct,1)+'%':'—')+'</td></tr>';
     }).join('');
     const blocks=v.ready&&v.blocks?.length?v.blocks.map(x=>'<div class="swing-history-row"><span>'+tm(x.from)+'–'+tm(x.to)+'</span><b>'+swingPct(x.change)+' / '+swingPct(x.range)+'</b></div>').join(''):'<p>连续样本不足</p>';
-    body.innerHTML='<div class="swing-kicker">'+esc(v.symbol||store.symbol)+' · '+esc(v.exchangeLabel||'')+' · 只读研究</div><div class="swing-price" id="swingLivePrice">—</div><p id="swingQuoteStatus">等待独立公开报价</p>'  +riskCard+swingHorizonAudit(v)+stage+'<details class="swing-card" data-swing-fold="old-follow"><summary><b>原60秒观察及五模型历史复核</b><span class="swing-fold-hint">详情 ›</span></summary>'+swingFollowCard(v)+swingStudies(v)+'</details>'+'<details class="swing-card" data-swing-fold="periods"><summary><b>1 / 3 / 5分钟实际变化</b><span class="swing-fold-hint">详情 ›</span></summary><div class="swing-table-scroll"><table class="swing-mini-table"><thead><tr><th>周期</th><th>涨跌</th><th>回升</th><th>回落</th><th>主动买</th></tr></thead><tbody>'+rows+'</tbody></table></div></details><details class="swing-card" data-swing-fold="history"><summary><b>历史5分钟区间复核</b><span class="swing-fold-hint">详情 ›</span></summary><p>已发生区间涨跌 / 振幅</p>'+blocks+'</details><p class="swing-compact-note">公开成交采样 · 与2H主模型独立。不生成未来方向、入场指令或盈利概率。</p>';
+    body.innerHTML='<div class="swing-kicker">'+esc(v.symbol||store.symbol)+' · '+esc(v.exchangeLabel||'')+' · 只读研究</div><div class="swing-price" id="swingLivePrice">—</div><p id="swingQuoteStatus">等待独立公开报价</p>'  +riskCard+swingClosedLab(v)+swingHorizonAudit(v)+stage+'<details class="swing-card" data-swing-fold="old-follow"><summary><b>原60秒观察及五模型历史复核</b><span class="swing-fold-hint">详情 ›</span></summary>'+swingFollowCard(v)+swingStudies(v)+'</details>'+'<details class="swing-card" data-swing-fold="periods"><summary><b>1 / 3 / 5分钟实际变化</b><span class="swing-fold-hint">详情 ›</span></summary><div class="swing-table-scroll"><table class="swing-mini-table"><thead><tr><th>周期</th><th>涨跌</th><th>回升</th><th>回落</th><th>主动买</th></tr></thead><tbody>'+rows+'</tbody></table></div></details><details class="swing-card" data-swing-fold="history"><summary><b>历史5分钟区间复核</b><span class="swing-fold-hint">详情 ›</span></summary><p>已发生区间涨跌 / 振幅</p>'+blocks+'</details><p class="swing-compact-note">公开成交采样 · 与2H主模型独立。不生成未来方向、入场指令或盈利概率。</p>';
     for(const x of body.querySelectorAll('details[data-swing-fold]'))x.open=expanded.has(x.dataset.swingFold);
     body.scrollTop=scroll;renderSwingQuote();
   }

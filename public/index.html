@@ -8,7 +8,7 @@
   <title>合约实时数据Pro v9代 · 南柯一梦制作</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css?v=pro4-classic-v9-five">
-  <script src="/app.js?v=pro-v9-horizon-audit" defer></script>
+  <script src="/app.js?v=pro-v9-closed-lab" defer></script>
 
   <style id="wechat-layout-v1">
     :root{--bg:#ededed;--paper:#fff;--text:#171717;--muted:#666;--border:#e8e8e8;--blue:#3275c9;--green:#079657;--red:#d34a50;--shadow:none;--accent:#07a85b}
@@ -159,6 +159,7 @@
 </style>
 <style id="lab-compact-details">.lab-compact-detail{margin-top:7px;font-size:12px}.lab-compact-detail summary{color:#667282;cursor:pointer;padding:6px 0}.lab-card h4{margin-bottom:6px}.lab-card p{font-size:11px;line-height:1.4}</style>
 <style id="swing-follow-style">.swing-follow-state{font-weight:600;color:#42556c}.swing-follow-steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin:9px 0}.swing-follow-steps span{background:#f0f3f7;color:#67748a;font-size:10px;text-align:center;padding:6px 2px;border-radius:4px}.swing-follow-time{font-size:21px;font-weight:700;font-variant-numeric:tabular-nums;color:#30475f}.swing-follow-track{height:7px;border-radius:8px;background:#e9edf2;overflow:hidden;margin:7px 0}.swing-follow-track i{display:block;height:100%;background:#8199b5}.swing-follow details{margin-top:10px;border-top:1px solid #dce3ed;padding-top:9px}.swing-follow .swing-study-grid{margin:10px 0}</style>
+<style id="swing-closed-lab-style">.swing-closed-row{border-top:1px solid #dce3ed;padding:10px 0}.swing-closed-row b{font-size:13px}.swing-closed-row small{display:block;font-size:11px;color:#64748b;margin:4px 0 8px}.swing-closed-prices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;font-size:11px;color:#64748b}.swing-closed-prices strong{display:block;color:#334155;font-size:13px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums;margin-top:4px}</style>
 </head>
 <body data-pro-view="market">
 <div class="shell">
@@ -967,7 +968,7 @@ async function refresh(){
       line(fold,'最大已结算回撤',money(a.maxDrawdown)+' U');line(fold,'穿越价格累计盈亏',signed(a.observedNet)+' U');return c;
     }));
     renderShortStudy(d.shortStudy);
-    const names={tp:'触及止盈',sl:'触及止损',gap:'断流作废',restart:'重启作废'};
+    const names={tp:'触及止盈',sl:'触及止损',gap:'断流作废',restart:'重启作废',loss_limit:'模拟亏损上限作废'};
     rows.replaceChildren(...d.history.map(h=>{const tr=el('tr');for(const x of [stamp(h.exitAt),h.label,h.symbol,names[h.reason]||h.reason,signed(h.pnl),signed(h.observedPnl)])tr.append(el('td',x));return tr}));
     if(!d.history.length){const tr=el('tr'),td=el('td','暂无已完成的真实研究样本');td.colSpan=6;tr.append(td);rows.append(tr)}
   }catch(e){status.textContent='接口暂不可用；以下如有记录为上次读取结果，不代表当前状态。';$('shortStudyStatus').textContent='接口暂不可用，现有记录为上次结果。'}

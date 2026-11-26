@@ -45,6 +45,9 @@ function createLab({initial=null,save=()=>{},now=Date.now,enabled=true,error=""}
   let failure=error,alive=enabled&&!error,latestAt=0;
   const round=x=>Math.round(x*10000)/10000;
   const used=a=>Object.values(a.positions).reduce((n,p)=>n+p.margin,0);
+  const lossLimit=500;
+  const netTotal=()=>round(codes.reduce((n,k)=>n+s.accounts[k].balance-config.capital,0));
+  function enforceLossLimit(t){if(!s.lossStoppedAt&&netTotal()<=-lossLimit){s.lossStoppedAt=t;return true}return false}
   function persist(){if(!alive)return;try{save(s)}catch(e){failure="保存失败，已暂停模拟："+String(e.message||e).slice(0,120);alive=false}}
   function stat(a,symbol){return a.bySymbol[symbol]||(a.bySymbol[symbol]={wins:0,losses:0,invalid:0,skipped:0,net:0,observedNet:0})}
   function finish(code,symbol,p,at,reason,price=null,observed=null){
@@ -61,9 +64,9 @@ function createLab({initial=null,save=()=>{},now=Date.now,enabled=true,error=""}
     if(s.history.length>2000)s.history.length=2000;
   }
   // A restart cannot recreate the unseen path. Never count an interrupted position as a winner.
-  if(alive){let changed=false;for(const code of codes)for(const [sym,p] of Object.entries(s.accounts[code].positions)){finish(code,sym,p,now(),"restart");changed=true}if(changed)persist()}
+  if(alive){let changed=false;for(const code of codes)for(const [sym,p] of Object.entries(s.accounts[code].positions)){finish(code,sym,p,now(),"restart");changed=true}if(enforceLossLimit(now()))changed=true;if(changed)persist()}
   function scan(symbol,view,t=now()){
-    if(symbol!==config.symbol)return false;
+    if(symbol!==config.symbol||s.lossStoppedAt)return false;
     if(!alive||!view?.ready||!Number.isFinite(view.latestAt)||t-view.latestAt>config.maxGapMs||view.latestAt>t+1000)return false;
     const code=view.phase?.code,turn=view.phase?.turnAt;
     if(!codes.includes(code)||!Number.isFinite(turn)||turn>view.latestAt||view.latestAt-turn>60000)return false;
@@ -90,8 +93,9 @@ function createLab({initial=null,save=()=>{},now=Date.now,enabled=true,error=""}
       if(at-p.lastAt>config.maxGapMs){finish(code,symbol,p,t,"gap");changed=true;continue}
       p.lastAt=at;
       const raw=(code.startsWith("up")?1:-1)*(price/p.entry-1)*p.margin*config.leverage;
-      if(raw>=config.tp-1e-8||raw<=-config.sl+1e-8){finish(code,symbol,p,at,raw>0?"tp":"sl",price,round(raw));changed=true}
+      if(raw>=config.tp-1e-8||raw<=-config.sl+1e-8){finish(code,symbol,p,at,raw>0?"tp":"sl",price,round(raw));changed=true;if(enforceLossLimit(t))break}
     }
+    if(s.lossStoppedAt){for(const code of codes)for(const [sym,p] of Object.entries(s.accounts[code].positions)){finish(code,sym,p,t,"loss_limit");changed=true}}
     if(changed)persist();
   }
   function sweep(t=now()){
@@ -100,7 +104,7 @@ function createLab({initial=null,save=()=>{},now=Date.now,enabled=true,error=""}
     if(changed)persist();
   }
   function snapshot(t=now()){
-    return {version:"swing-signal-lab-btc-v1",symbol:config.symbol,config,startedAt:s.startedAt,serverAt:t,latestAt,enabled:alive,error:failure,
+    return {version:"swing-signal-lab-btc-v1",symbol:config.symbol,config,startedAt:s.startedAt,serverAt:t,latestAt,enabled:alive,error:failure,lossGuard:{limit:lossLimit,net:netTotal(),stoppedAt:s.lossStoppedAt||null},
       accounts:codes.map(code=>{const a=s.accounts[code],count=a.wins+a.losses;return {code,label:labels[code],balance:a.balance,net:round(a.balance-config.capital),reserved:used(a),active:Object.keys(a.positions).length,wins:a.wins,losses:a.losses,invalid:a.invalid,skipped:a.skipped,observedNet:a.observedNet,maxDrawdown:a.maxDrawdown,winRate:count?round(a.wins/count*100):null,bySymbol:a.bySymbol}}),
       history:s.history.slice(0,100)};
   }
@@ -1462,7 +1466,7 @@ const server=http.createServer((req,res)=>{
     const symbol=(url.searchParams.get('symbol')||'').toUpperCase();
     const m=MARKETS.get(symbol);if(!m)return reply(res,404,{error:'合约不可用'});
     if(!pro2Trades.watch(symbol))return reply(res,200,{version:'ssr-research-v1',symbol,ready:false,reason:'该合约暂无支持的公开主动成交流',periods:[]});
-    return reply(res,200,{...pro2Trades.getSwing(symbol),symbol,exchangeLabel:m.exchangeLabel,shortStudy:swingStudySummary(symbol,shortStudy),follow:swingFollow.snapshot(symbol),horizonAudit:symbol==='BTCUSDT'?horizonAudit.snapshot():null});
+    return reply(res,200,{...pro2Trades.getSwing(symbol),symbol,exchangeLabel:m.exchangeLabel,shortStudy:swingStudySummary(symbol,shortStudy),follow:swingFollow.snapshot(symbol),horizonAudit:symbol==='BTCUSDT'?horizonAudit.snapshot():null,closedLab:symbol==='BTCUSDT'?(()=>{const d=signalLab.snapshot();return {enabled:d.enabled,lossGuard:d.lossGuard,history:d.history.filter(x=>['tp','sl'].includes(x.reason)&&Number.isFinite(x.entry)&&Number.isFinite(x.exit)).slice(0,10).map(x=>({label:x.label,entry:x.entry,exit:x.exit,exitAt:x.exitAt,reason:x.reason,pnl:x.pnl,observedPnl:x.observedPnl}))}})():null});
   }
   if(url.pathname==='/api/pro2/health')return reply(res,200,pro2.state());
   if(url.pathname==='/api/paper')return reply(res,200,paper.snapshot(Date.now()));
