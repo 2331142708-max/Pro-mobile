@@ -570,9 +570,9 @@
     if(v?.symbol!=='BTCUSDT'||!Array.isArray(v.horizonAudit?.history))return null;
     return v.horizonAudit.history.reduce((n,r)=>r?.reason==='complete'&&r.minutes===2&&Number.isFinite(r.endedAt)&&r.endedAt>0&&r.endedAt<=v.horizonAudit.serverAt+1000?Math.max(n,r.endedAt):n,0);
   }
-  let reviewSound=false,reviewAudio=null,reviewSeen=null,reviewLastNotice=0,reviewPulse=null;
+  let reviewSound=false,reviewAudio=null,reviewSeen=null,reviewLastNotice=0,reviewPulse=null,reviewToneTimers=[];
   const reviewToggle=$('swingReviewSound'),reviewNotice=$('swingReviewNotice');
-  function clearReviewPulse(){if(reviewPulse){reviewPulse.remove();reviewPulse=null;}}
+  function clearReviewPulse(){for(const timer of reviewToneTimers)clearTimeout(timer);reviewToneTimers=[];if(reviewPulse){reviewPulse.remove();reviewPulse=null;}}
   function showReviewPulse(){
     clearReviewPulse();
     if(!swingDialog.open||document.visibilityState!=='visible'||window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches)return;
@@ -580,7 +580,7 @@
     el.style.cssText='position:fixed;inset:0;pointer-events:none;z-index:2147483646;background:rgba(75,110,145,.045);box-shadow:inset 0 0 0 4px rgba(75,110,145,.18);opacity:0';
     if(typeof el.animate!=='function')return;
     swingDialog.appendChild(el);reviewPulse=el;
-    try{const animation=el.animate([{opacity:0},{opacity:1},{opacity:0}],{duration:1400,iterations:4,easing:'ease-in-out'});animation.onfinish=animation.oncancel=()=>{el.remove();if(reviewPulse===el)reviewPulse=null;};}catch{clearReviewPulse();}
+    try{const animation=el.animate([{opacity:0},{opacity:1},{opacity:0}],{duration:1400,iterations:4,easing:'ease-in-out'});animation.onfinish=animation.oncancel=()=>{el.remove();if(reviewPulse===el)reviewPulse=null;};return true;}catch{clearReviewPulse();return false;}
   }
   function paintReviewToggle(){reviewToggle.textContent=reviewSound?'提醒开':'提醒关';reviewToggle.setAttribute('aria-pressed',String(reviewSound));}
   function resetReviewReminder(){clearReviewPulse();reviewSound=false;reviewSeen=null;reviewLastNotice=0;reviewNotice.hidden=true;reviewNotice.textContent='';paintReviewToggle()}
@@ -593,7 +593,7 @@
       if(reviewAudio.state!=='running')await reviewAudio.resume();
       if(!swingDialog.open||generation!==swingGeneration)return;
       if(reviewAudio.state!=='running')throw Error('audio unavailable');
-      reviewSound=true;reviewSeen=completedReviewStamp(swingFullData);reviewNotice.textContent='已开启：2分钟复核完成时轻提示及4次柔和全屏提示';reviewNotice.hidden=false;paintReviewToggle();
+      reviewSound=true;reviewSeen=completedReviewStamp(swingFullData);reviewNotice.textContent='已开启：2分钟复核完成时4次柔和全屏提示及同步轻提示音';reviewNotice.hidden=false;paintReviewToggle();
     }catch{reviewSound=false;paintReviewToggle();reviewNotice.textContent='声音不可用，请重新点击开启';reviewNotice.hidden=false}
   });
   function reviewCompleted(v){
@@ -603,8 +603,13 @@
     if(!reviewSound||prev===null||latest<=prev||document.visibilityState!=='visible'||!swingDialog.open)return;
     const t=Date.now();
     if(t-reviewLastNotice<60000)return;
-    reviewLastNotice=t;reviewNotice.textContent='已有新的2分钟历史复核结果 · 非下单提示';reviewNotice.hidden=false;showReviewPulse();
-    if(reviewAudio?.state!=='running')return;
+    reviewLastNotice=t;reviewNotice.textContent='已有新的2分钟历史复核结果 · 非下单提示';reviewNotice.hidden=false;
+    if(showReviewPulse()){
+      for(let i=0;i<4;i++)reviewToneTimers.push(setTimeout(playReviewTone,700+i*1400));
+    }else{playReviewTone();}
+  }
+  function playReviewTone(){
+    if(!reviewSound||!swingDialog.open||document.visibilityState!=='visible'||reviewAudio?.state!=='running')return;
     try{
       const at=reviewAudio.currentTime,o=reviewAudio.createOscillator(),g=reviewAudio.createGain();
       o.type='sine';o.frequency.value=523.25;g.gain.setValueAtTime(.0001,at);g.gain.exponentialRampToValueAtTime(.045,at+.035);g.gain.exponentialRampToValueAtTime(.0001,at+.22);
