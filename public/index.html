@@ -194,16 +194,16 @@
 
 <section id="signalLabPanel" class="signal-lab" aria-label="BTCUSDT 实时模拟研究">
   <div class="lab-heading"><h2>实时模拟 · BTCUSDT</h2><button type="button" class="lab-return" id="signalLabReturn">返回行情</button></div>
-  <p>两套独立虚拟研究账本从零开始，使用五模型已完成的60秒历史观察，仅统计公开成交结果。不连接真实交易账户，不充值、不下单、不提现。</p>
+  <p>五套独立虚拟研究账本，使用五模型已完成的60秒历史观察，仅统计公开成交结果。不连接真实交易账户，不充值、不下单、不提现。</p>
   <div class="lab-header"><strong>每套初始 1,000 U · 单样本 100 U · 假设 125× · 固定阈值 +15 / −15 U · 手续费 0</strong>
   <p>理论余额按固定阈值计算，另列观测穿越价格的理论盈亏。未模拟真实强平、滑点、点差、手续费与资金费率，不代表可实现收益或交易建议。断流或重启样本作废，不计胜负。</p>
   <div id="signalLabStatus" class="lab-status" role="status">等待接口…</div><p id="signalLabStarted" class="lab-open"></p></div>
-  <h3>两套独立模拟结果</h3><p>方案1：五模型中至少三个历史方向一致。方案2：同方向的模型中至少两个右侧结果标签一致（正确、错误或温和）。仅使用本轮开始后、最近5分钟内完成的记录；同一组合不重复计入。每套同时最多一个样本。累计理论净亏损达500 U停止新增。</p><div id="signalLabCards" class="lab-cards"><p>正在读取两套模拟…</p></div>
+  <h3>五套独立模拟结果</h3><p>方案1：至少三个历史方向一致。方案2：至少三个同方向，且其中两个右侧结果标签一致（正确、错误或温和）。方案3：五方向一致且至少一正确。方案4：至少两方向一致且全体至少四个结果为正确或温和（仅本方案合并），方向取唯一较多方，平票跳过。方案5：五方向一致且五结果均正确。各账本仅使用自身开始后、最近5分钟内完成的记录；同一组合不重复计入。每套同时最多一个样本。累计理论净亏损达500 U停止新增。</p><div id="signalLabCards" class="lab-cards"><p>正在读取五套模拟…</p></div>
   <h3>新增五种短时模型 · 独立观察</h3>
   <div class="lab-header"><p>仅 BTCUSDT。按连续真实成交识别已经出现的变化，统一观察其后60秒的实际价格变化；不进行杠杆买卖，不用理论胜率承诺盈利。图片未指定具体阈值，采用未验证的研究假设。盘口模型是连续快照近似，不是全量挂撤单OFI。</p><div id="shortStudyStatus" class="lab-status">等待接口…</div></div>
   <div id="shortStudyCards" class="lab-cards" style="margin-top:10px"><p>正在读取五类研究…</p></div>
   <h3>新增模型 · 最近完成观察</h3><div class="lab-table"><table><thead><tr><th>时间</th><th>模型</th><th>观察类别</th><th>行情环境</th><th>实际同向变化</th><th>状态</th></tr></thead><tbody id="shortStudyRows"></tbody></table></div>
-  <h3>两套方案 · 最近完成的模拟样本</h3><p>仅展示最近100条，累计统计独立保存。未完成、作废样本不计理论胜率。</p>
+  <h3>五套方案 · 最近完成的模拟样本</h3><p>仅展示最近100条，累计统计独立保存。未完成、作废样本不计理论胜率。</p>
   <div class="lab-table"><table><thead><tr><th>时间</th><th>阶段</th><th>合约</th><th>结果</th><th>理论盈亏 U</th><th>观测穿越盈亏 U</th></tr></thead><tbody id="signalLabRows"></tbody></table></div>
 </section>
 <section class="practice-paused" id="practicePaused" aria-label="暂停服务"><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="20"/><path d="M20 16v16M28 16v16" stroke-linecap="round" stroke-width="3"/></svg><h2>暂停服务</h2><p>请返回其他界面</p><button type="button" id="practiceReturn">返回行情</button></section>
@@ -965,7 +965,7 @@ async function refresh(){
     const r=await fetch('/api/pro2/signal-lab',{cache:'no-store',credentials:'same-origin',signal:controller.signal});
     if(r.status===401){location.replace('/login');return}
     if(!r.ok)throw Error('接口暂不可用');
-    const d=await r.json();if(!Array.isArray(d.accounts)||d.accounts.length!==2||!Array.isArray(d.history))throw Error('结果格式不正确');
+    const d=await r.json();if(!Array.isArray(d.accounts)||d.accounts.length!==5||!Array.isArray(d.history))throw Error('结果格式不正确');
     status.textContent=!d.enabled?'已暂停：'+(d.error||'未启用'):d.lossGuard?.stoppedAt?'累计模拟净亏损达到500 U · 已停止新增':d.latestAt&&d.serverAt-d.latestAt<=6000?'正在采集公开成交 · '+stamp(d.latestAt):'等待新鲜公开成交 · 无有效价格时不产生样本';
     $('signalLabStarted').textContent='研究开始：'+stamp(d.startedAt)+' · 数据读取：'+stamp(d.serverAt);
     const oldExpanded=new Set([...cards.querySelectorAll('details[open][data-lab-fold]')].map(x=>x.dataset.labFold));
@@ -973,7 +973,7 @@ async function refresh(){
       const c=el('section',undefined,'lab-card');
       c.append(el('h4',a.label),el('div',money(a.balance)+' U','lab-balance'));
       line(c,'理论累计盈亏',signed(a.net)+' U');line(c,'触及止盈 / 止损',a.wins+' / '+a.losses);
-      line(c,'已完成样本',String(a.wins+a.losses));const fold=el('details',undefined,'lab-compact-detail');fold.dataset.labFold=a.code;fold.open=oldExpanded.has(a.code);fold.append(el('summary','更多历史统计'));c.append(fold);line(fold,'理论胜率',a.winRate==null?'样本不足':money(a.winRate)+'%');
+      line(c,'已完成样本',String(a.wins+a.losses));const fold=el('details',undefined,'lab-compact-detail');fold.dataset.labFold=a.code;fold.open=oldExpanded.has(a.code);fold.append(el('summary','更多历史统计'));c.append(fold);line(fold,'研究开始',stamp(a.startedAt));line(fold,'理论胜率',a.winRate==null?'样本不足':money(a.winRate)+'%');
       line(fold,'中断作废 / 跳过',a.invalid+' / '+a.skipped);
       line(fold,'最大已结算回撤',money(a.maxDrawdown)+' U');line(fold,'穿越价格累计盈亏',signed(a.observedNet)+' U');return c;
     }));

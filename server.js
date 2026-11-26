@@ -37,11 +37,18 @@ const pro2=createPro2({markets:MARKETS,json,binance:BINANCE,okx:OKX,log,stopped:
  * commit. Inlined to comply with the existing deployment file allowlist. */
 function createLab({initial=null,save=()=>{},now=Date.now,enabled=true,error=""}={}){
   const config=Object.freeze({symbol:"BTCUSDT",capital:1000,margin:100,leverage:125,tp:15,sl:15,fee:0,maxGapMs:6000});
-  const labels={consensus3:"方案1 · 三模型同向",consensus32:"方案2 · 三同向＋两结果一致"};
+  const labels={consensus3:"方案1 · 三模型同向",consensus32:"方案2 · 三同向＋两结果一致",consensus51:"方案3 · 五同向＋一正确",consensus24:"方案4 · 两同向＋四正确或温和",consensus55:"方案5 · 五同向＋五正确"};
   const codes=Object.keys(labels);
-  const fresh=()=>({version:1,startedAt:now(),accounts:Object.fromEntries(codes.map(code=>[code,{balance:1000,wins:0,losses:0,invalid:0,skipped:0,observedNet:0,peak:1000,maxDrawdown:0,bySymbol:{},positions:{},lastTurn:{}}])),history:[]});
+  const newAccount=(startedAt)=>({startedAt,balance:1000,wins:0,losses:0,invalid:0,skipped:0,observedNet:0,peak:1000,maxDrawdown:0,bySymbol:{},positions:{},lastTurn:{}});
+  const fresh=()=>{const t=now();return {version:1,startedAt:t,accounts:Object.fromEntries(codes.map(code=>[code,newAccount(t)])),history:[]}};
   const s=initial||fresh();
-  if(s.version!==1||!s.accounts||!Array.isArray(s.history)||codes.some(k=>!s.accounts[k]||!Number.isFinite(s.accounts[k].balance)||!s.accounts[k].positions||!s.accounts[k].lastTurn||!s.accounts[k].bySymbol))throw Error("模拟记录格式不兼容");
+  if(s.version!==1||!s.accounts||!Array.isArray(s.history)||!Number.isFinite(s.startedAt)||['consensus3','consensus32'].some(k=>!s.accounts[k]))throw Error("模拟记录格式不兼容");
+  for(const k of codes){
+    if(!s.accounts[k])s.accounts[k]=newAccount(now());
+    const a=s.accounts[k];
+    if(!Number.isFinite(a.balance)||!a.positions||!a.lastTurn||!a.bySymbol)throw Error("模拟记录格式不兼容");
+    if(!Number.isFinite(a.startedAt))a.startedAt=s.startedAt;
+  }
   let failure=error,alive=enabled&&!error,latestAt=0;
   const round=x=>Math.round(x*10000)/10000;
   const used=a=>Object.values(a.positions).reduce((n,p)=>n+p.margin,0);
@@ -71,22 +78,29 @@ function createLab({initial=null,save=()=>{},now=Date.now,enabled=true,error=""}
     if(symbol!==config.symbol||s.lossStoppedAt||!alive||!study?.enabled||!Number.isFinite(study.latestAt)||t-study.latestAt>config.maxGapMs||study.latestAt>t+1000)return false;
     const codes5=['exhaustion','failed_break','absorption','ofi','vwap'];
     const votes=codes5.map(k=>(study.history||[]).find(x=>x.code===k&&x.reason==='complete')).filter(x=>x&&Number.isFinite(x.change)&&Number.isFinite(x.endAt)&&x.endAt>=s.startedAt&&x.endAt<=study.latestAt&&t-x.endAt<=300000&&['回升','回落'].includes(x.direction)&&(x.code!=='ofi'||Number.isFinite(study.bookAt)&&t-study.bookAt<=10000));
-    const up=votes.filter(x=>x.direction==='回升'),down=votes.filter(x=>x.direction==='回落');
-    const agreeing=up.length>=3?up:down.length>=3?down:null;
-    if(!agreeing)return false;
-    const direction=agreeing[0].direction==='回升'?1:-1;
-    const counts={correct:0,wrong:0,flat:0};
-    for(const x of agreeing)counts[x.change>.005?'correct':x.change<-.005?'wrong':'flat']++;
-    const sameResult=Math.max(...Object.values(counts))>=2;
-    const key=agreeing.map(x=>x.code+':'+x.endAt+':'+x.direction).sort().join('|');
     let dirty=false,entered=false;
     for(const code of codes){
-      if(code==='consensus32'&&!sameResult)continue;
       const a=s.accounts[code];
+      const eligible=votes.filter(x=>x.endAt>=a.startedAt);
+      const up=eligible.filter(x=>x.direction==='回升'),down=eligible.filter(x=>x.direction==='回落');
+      // Direction ties are ambiguous, so they are not counted as directional samples.
+      const agreeing=up.length>down.length?up:down.length>up.length?down:[];
+      if(!agreeing.length)continue;
+      const direction=agreeing[0].direction==='回升'?1:-1;
+      const counts={correct:0,wrong:0,flat:0};
+      for(const x of agreeing)counts[x.change>.005?'correct':x.change<-.005?'wrong':'flat']++;
+      let qualifies=false,inputs=agreeing;
+      if(code==='consensus3')qualifies=agreeing.length>=3;
+      else if(code==='consensus32')qualifies=agreeing.length>=3&&Math.max(...Object.values(counts))>=2;
+      else if(code==='consensus51')qualifies=agreeing.length===5&&counts.correct>=1;
+      else if(code==='consensus24'){qualifies=agreeing.length>=2&&eligible.filter(x=>x.change>=-.005).length>=4;inputs=eligible}
+      else if(code==='consensus55')qualifies=agreeing.length===5&&counts.correct===5;
+      if(!qualifies)continue;
+      const key=inputs.map(x=>x.code+':'+x.endAt+':'+x.direction).sort().join('|');
       if(a.lastTurn[symbol]===key)continue;
       a.lastTurn[symbol]=key;dirty=true;
       if(a.positions[symbol]||a.balance-used(a)<config.margin){a.skipped++;stat(a,symbol).skipped++;continue}
-      a.positions[symbol]={symbol,code,direction,turnAt:Math.max(...agreeing.map(x=>x.endAt)),detectedAt:t,afterAt:study.latestAt,margin:config.margin,entry:null,lastAt:t};
+      a.positions[symbol]={symbol,code,direction,turnAt:Math.max(...inputs.map(x=>x.endAt)),detectedAt:t,afterAt:study.latestAt,margin:config.margin,entry:null,lastAt:t};
       entered=true;
     }
     if(dirty)persist();
@@ -119,7 +133,7 @@ function createLab({initial=null,save=()=>{},now=Date.now,enabled=true,error=""}
   }
   function snapshot(t=now()){
     return {version:"swing-consensus-lab-btc-v1",symbol:config.symbol,config,startedAt:s.startedAt,serverAt:t,latestAt,enabled:alive,error:failure,lossGuard:{limit:lossLimit,net:netTotal(),stoppedAt:s.lossStoppedAt||null},
-      accounts:codes.map(code=>{const a=s.accounts[code],count=a.wins+a.losses;return {code,label:labels[code],balance:a.balance,net:round(a.balance-config.capital),reserved:used(a),active:Object.keys(a.positions).length,wins:a.wins,losses:a.losses,invalid:a.invalid,skipped:a.skipped,observedNet:a.observedNet,maxDrawdown:a.maxDrawdown,winRate:count?round(a.wins/count*100):null,bySymbol:a.bySymbol}}),
+      accounts:codes.map(code=>{const a=s.accounts[code],count=a.wins+a.losses;return {code,label:labels[code],startedAt:a.startedAt,balance:a.balance,net:round(a.balance-config.capital),reserved:used(a),active:Object.keys(a.positions).length,wins:a.wins,losses:a.losses,invalid:a.invalid,skipped:a.skipped,observedNet:a.observedNet,maxDrawdown:a.maxDrawdown,winRate:count?round(a.wins/count*100):null,bySymbol:a.bySymbol}}),
       history:s.history.slice(0,100)};
   }
   return {scan,trade,sweep,snapshot,flush:persist};

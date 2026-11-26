@@ -477,12 +477,12 @@
 
   function swingClosedLab(v){
     const d=v.closedLab,guard=d?.lossGuard;
-    if(!d)return '<section class="swing-card"><h3>模拟阈值 · 历史复核</h3><p>仅 BTCUSDT 两套一致性研究的已完成样本。</p></section>';
+    if(!d)return '<section class="swing-card"><h3>模拟阈值 · 历史复核</h3><p>仅 BTCUSDT 五套一致性研究的已完成样本。</p></section>';
     const signed=x=>Number.isFinite(x)?(x>0?'+':'')+x.toFixed(2)+' U':'—';
     const stamp=t=>Number.isFinite(t)?new Date(t).toLocaleTimeString('zh-CN',{hour12:false}):'—';
     const rows=(d.history||[]).map(x=>'<div class="swing-closed-row"><div><b>'+esc(x.label)+'</b><small>'+stamp(x.exitAt)+' · 已完成 · '+(x.reason==='tp'?'历史正阈值触及':'历史负阈值触及')+'</small></div><div class="swing-closed-prices"><span>历史参考价<strong>'+price(x.entry)+'</strong></span><span>实际结束价<strong>'+price(x.exit)+'</strong></span><span>观测理论结果<strong>'+signed(x.observedPnl)+'</strong></span></div></div>').join('');
     const state=!d.enabled?'模拟数据暂不可用':guard?.stoppedAt?'模拟累计净亏损达到上限 · 已停止新增':'仅后台模拟研究';
-    return '<section class="swing-card"><h3>模拟止盈止损 · 历史复核</h3><p><b>'+esc(state)+'</b></p>'+(guard?'<p>两账本累计理论净盈亏 '+signed(guard.net)+' · 模拟停止上限 '+esc(guard.limit)+' U</p>':'')+(rows?rows:'<p>暂无完整阈值触及记录</p>')+'<p>仅显示已经结束的研究记录，不生成当前进场、止盈或止损指令。理论结果未计实际费用、滑点及强平。</p></section>';
+    return '<section class="swing-card"><h3>模拟止盈止损 · 历史复核</h3><p><b>'+esc(state)+'</b></p>'+(guard?'<p>五账本累计理论净盈亏 '+signed(guard.net)+' · 模拟停止上限 '+esc(guard.limit)+' U</p>':'')+(rows?rows:'<p>暂无完整阈值触及记录</p>')+'<p>仅显示已经结束的研究记录，不生成当前进场、止盈或止损指令。理论结果未计实际费用、滑点及强平。</p></section>';
   }
 
 
