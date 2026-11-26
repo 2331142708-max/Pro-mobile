@@ -563,12 +563,51 @@
     body.scrollTop=scroll;renderSwingQuote();
   }
 
+
+  // Optional quiet reminder for completed five-minute research records only.
+  // Never reacts to a live direction, a candidate event or a quotation.
+  function completedReviewStamp(v){
+    if(v?.symbol!=='BTCUSDT'||!Array.isArray(v.horizonAudit?.history))return null;
+    return v.horizonAudit.history.reduce((n,r)=>r?.reason==='complete'&&r.minutes===5&&Number.isFinite(r.endedAt)&&r.endedAt>0&&r.endedAt<=v.horizonAudit.serverAt+1000?Math.max(n,r.endedAt):n,0);
+  }
+  let reviewSound=false,reviewAudio=null,reviewSeen=null,reviewLastNotice=0;
+  const reviewToggle=$('swingReviewSound'),reviewNotice=$('swingReviewNotice');
+  function paintReviewToggle(){reviewToggle.textContent=reviewSound?'提醒开':'提醒关';reviewToggle.setAttribute('aria-pressed',String(reviewSound));}
+  function resetReviewReminder(){reviewSound=false;reviewSeen=null;reviewLastNotice=0;reviewNotice.hidden=true;reviewNotice.textContent='';paintReviewToggle()}
+  reviewToggle.addEventListener('click',async()=>{
+    if(reviewSound){reviewSound=false;reviewNotice.hidden=true;paintReviewToggle();return}
+    const generation=swingGeneration;
+    try{
+      const Audio=window.AudioContext||window.webkitAudioContext;if(!Audio)throw Error('not supported');
+      if(!reviewAudio||reviewAudio.state==='closed')reviewAudio=new Audio();
+      if(reviewAudio.state!=='running')await reviewAudio.resume();
+      if(!swingDialog.open||generation!==swingGeneration)return;
+      if(reviewAudio.state!=='running')throw Error('audio unavailable');
+      reviewSound=true;reviewSeen=completedReviewStamp(swingFullData);reviewNotice.textContent='已开启：5分钟复核完成时轻提示';reviewNotice.hidden=false;paintReviewToggle();
+    }catch{reviewSound=false;paintReviewToggle();reviewNotice.textContent='声音不可用，请重新点击开启';reviewNotice.hidden=false}
+  });
+  function reviewCompleted(v){
+    const latest=completedReviewStamp(v);
+    if(latest===null)return;
+    const prev=reviewSeen;reviewSeen=prev===null?latest:Math.max(prev,latest);
+    if(!reviewSound||prev===null||latest<=prev||document.visibilityState!=='visible'||!swingDialog.open)return;
+    const t=Date.now();
+    if(t-reviewLastNotice<60000)return;
+    reviewLastNotice=t;reviewNotice.textContent='已有新的5分钟历史复核结果';reviewNotice.hidden=false;
+    if(reviewAudio?.state!=='running')return;
+    try{
+      const at=reviewAudio.currentTime,o=reviewAudio.createOscillator(),g=reviewAudio.createGain();
+      o.type='sine';o.frequency.value=523.25;g.gain.setValueAtTime(.0001,at);g.gain.exponentialRampToValueAtTime(.045,at+.035);g.gain.exponentialRampToValueAtTime(.0001,at+.22);
+      o.connect(g);g.connect(reviewAudio.destination);o.start(at);o.stop(at+.23);
+    }catch{}
+  }
+
   async function refreshSwing(){if(!swingDialog.open||swingBusy)return;const generation=swingGeneration,symbol=store.symbol;swingBusy=true;
-    try{const v=await get('/api/pro2/swing?symbol='+encodeURIComponent(symbol));if(swingDialog.open&&generation===swingGeneration&&symbol===store.symbol)swingRender(v)}catch{if(swingDialog.open&&generation===swingGeneration)swingRender({symbol,ready:false,reason:'数据接口暂不可用，停止统计'})}finally{swingBusy=false}}
+    try{const v=await get('/api/pro2/swing?symbol='+encodeURIComponent(symbol));if(swingDialog.open&&generation===swingGeneration&&symbol===store.symbol){reviewCompleted(v);swingRender(v)}}catch{if(swingDialog.open&&generation===swingGeneration)swingRender({symbol,ready:false,reason:'数据接口暂不可用，停止统计'})}finally{swingBusy=false}}
   $('swingBody').addEventListener('click',e=>{const btn=e.target.closest('[data-swing-screen]');if(!btn||!swingFullData)return;swingFullView=btn.dataset.swingScreen;swingRender(swingFullData);$('swingBody').scrollTop=0;});
-  $('swingOpen').addEventListener('click',()=>{if(swingDialog.open)return;swingFullView='overview';swingGeneration++;swingRender({symbol:store.symbol,ready:false,reason:'等待真实成交'});swingQuote=null;swingDialog.showModal();$('swingBody').scrollTop=0;void refreshSwingQuote();void refreshSwing();swingTimer=setInterval(refreshSwing,2000);quoteTimer=setInterval(refreshSwingQuote,500);quoteAgeTimer=setInterval(renderSwingQuote,250)});
+  $('swingOpen').addEventListener('click',()=>{if(swingDialog.open)return;resetReviewReminder();swingFullView='overview';swingGeneration++;swingRender({symbol:store.symbol,ready:false,reason:'等待真实成交'});swingQuote=null;swingDialog.showModal();$('swingBody').scrollTop=0;void refreshSwingQuote();void refreshSwing();swingTimer=setInterval(refreshSwing,2000);quoteTimer=setInterval(refreshSwingQuote,500);quoteAgeTimer=setInterval(renderSwingQuote,250)});
   $('swingClose').addEventListener('click',()=>swingDialog.close());
-  swingDialog.addEventListener('close',()=>{swingGeneration++;clearInterval(swingTimer);clearInterval(quoteTimer);clearInterval(quoteAgeTimer);swingTimer=null;quoteTimer=null;quoteAgeTimer=null;swingQuote=null});
+  swingDialog.addEventListener('close',()=>{resetReviewReminder();swingGeneration++;clearInterval(swingTimer);clearInterval(quoteTimer);clearInterval(quoteAgeTimer);swingTimer=null;quoteTimer=null;quoteAgeTimer=null;swingQuote=null});
 
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){if(swingDialog.open){void refreshSwingQuote();void refreshSwing()}if(store.classicOpen)void refreshClassicLive()}});
   void refresh();setInterval(refresh,9000);setInterval(()=>{if(store.snap&&Date.now()-store.lastDetail>=4700)void refreshDetail()},5000);

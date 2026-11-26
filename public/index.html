@@ -8,7 +8,7 @@
   <title>合约实时数据Pro v9代 · 南柯一梦制作</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css?v=pro4-classic-v9-five">
-  <script src="/app.js?v=pro-v9-fullscreen-dashboard" defer></script>
+  <script src="/app.js?v=pro-v9-review-notice" defer></script>
 
   <style id="wechat-layout-v1">
     :root{--bg:#ededed;--paper:#fff;--text:#171717;--muted:#666;--border:#e8e8e8;--blue:#3275c9;--green:#079657;--red:#d34a50;--shadow:none;--accent:#07a85b}
@@ -166,6 +166,7 @@
 @media(min-width:760px) and (min-height:600px){.swing-dashboard{grid-template-columns:1fr 1fr;gap:9px}.sd-quote,.sd-bottom{grid-column:1/-1}.sd-historical,.sd-state-grid,.sd-follow{grid-column:1/-1}.sd-box{padding:9px 11px}.sd-table{font-size:12px}.sd-table td b,.sd-table th button b{font-size:13px}.sd-table td small,.sd-table th small{font-size:11px}.sd-section-title{font-size:14px}}
 @media(max-height:680px){.swing-dashboard{gap:3px}.sd-box{padding:4px 6px}.sd-table th,.sd-table td{padding:2px 1px}.sd-state-grid small{font-size:9px}.sd-quote-line strong{font-size:21px}}
 </style>
+<style id="swing-review-notice-style">#swingDialog #swingReviewSound{width:auto;height:30px;font-size:11px;line-height:1;padding:5px 9px;border-radius:5px;margin-left:auto;white-space:nowrap}#swingDialog #swingReviewSound[aria-pressed="true"]{background:#edf1f5;border-color:#b9c7d5}#swingReviewNotice{font-size:11px;padding:5px 10px;color:#546477;background:#f2f5f8;border-bottom:1px solid #dce3ed;flex:none}#swingReviewNotice[hidden]{display:none}</style>
 </head>
 <body data-pro-view="market">
 <div class="shell">
@@ -320,8 +321,8 @@
 </div>
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 <dialog id="swingDialog" class="swing-dialog" aria-labelledby="swingTitle">
-<div class="swing-head"><strong id="swingTitle">SSR · 波段回升回落</strong><button id="swingClose" type="button" aria-label="关闭波段窗口">×</button></div>
-<div id="swingBody" class="swing-body" aria-live="polite">等待真实成交…</div>
+<div class="swing-head"><strong id="swingTitle">SSR · 波段回升回落</strong><button id="swingReviewSound" type="button" aria-pressed="false" aria-label="开启或关闭已完成历史研究结果声音提醒">提醒关</button><button id="swingClose" type="button" aria-label="关闭波段窗口">×</button></div>
+<div id="swingReviewNotice" role="status" hidden></div><div id="swingBody" class="swing-body" aria-live="polite">等待真实成交…</div>
 </dialog>
 
 <dialog id="circleViewer" class="circle-viewer" aria-label="查看分享图片"><img id="circleViewerImage" alt="分享图片"><button id="circleViewerClose" type="button">关闭</button></dialog>
