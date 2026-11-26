@@ -838,13 +838,51 @@ function chatFiles(){
 function chatOwnFiles(name,files=chatFiles()){
   return files.filter(n=>{const a=n.split('.');return a[0]===name||a[1]===name});
 }
+
+const PRESENCE_FILE=path.join(dataPath,'chat-last-active-v1.json');
+const presenceLast=new Map();
+let presenceLoaded=false,presenceDirty=false,presenceSavedAt=0;
+const PRESENCE_ONLINE_MS=20000;
+function loadPresence(){
+  if(presenceLoaded)return;presenceLoaded=true;
+  try{
+    const value=JSON.parse(fs.readFileSync(PRESENCE_FILE,'utf8'));
+    for(const [name,at] of Object.entries(value))if(USER_RE.test(name)&&Number.isSafeInteger(at)&&at>0&&at<=Date.now()+1000)presenceLast.set(name,at);
+  }catch(e){if(e.code!=='ENOENT')log('PRESENCE_READ '+String(e.code||'invalid'))}
+}
+function savePresence(force=false){
+  if(!presenceDirty||(!force&&Date.now()-presenceSavedAt<30000))return;
+  try{
+    fs.mkdirSync(dataPath,{recursive:true,mode:0o700});
+    const tmp=PRESENCE_FILE+'.tmp';fs.writeFileSync(tmp,JSON.stringify(Object.fromEntries(presenceLast)),{mode:0o600});fs.renameSync(tmp,PRESENCE_FILE);
+    presenceSavedAt=Date.now();presenceDirty=false;
+  }catch(e){log('PRESENCE_SAVE '+String(e.code||'internal'))}
+}
+function touchPresence(req,now=Date.now()){
+  const session=sessions.get(sessionToken(req));
+  if(!session?.user||session.until<=now)return;
+  loadPresence();session.activeAt=now;
+  presenceLast.set(session.user.username,now);presenceDirty=true;savePresence();
+}
+function chatPresence(name,now=Date.now()){
+  loadPresence();
+  let online=false;
+  for(const session of sessions.values())if(session.user?.username===name&&session.until>now&&Number.isFinite(session.activeAt)&&now-session.activeAt<=PRESENCE_ONLINE_MS&&session.activeAt<=now+1000){online=true;break}
+  const at=presenceLast.get(name)||null;
+  return {online,lastActiveAt:at,ageMs:at===null?null:Math.max(0,now-at)};
+}
+function chatPeer(account,accepted){
+  const p=accountPublic(account);
+  return accepted?{...p,presence:chatPresence(account.username)}:p;
+}
+
 function chatList(name){
   const result=[];
   for(const file of chatOwnFiles(name)){
     const [a,b]=file.split('.'),peer=a===name?b:a,v=chatGet(name,peer),acc=readAccount(peer);
     if(!v||!acc||!v.users.includes(name))continue;
     const last=v.messages.at(-1),read=v.read[name]||0;
-    result.push({peer:accountPublic(acc),state:v.state,incoming:v.state==='pending'&&v.requester!==name,last:last?{text:last.text,at:last.at,from:last.from}:null,unread:v.state==='accepted'?v.messages.filter(m=>m.from!==name&&m.id>read).length:0,lastIncoming:v.state==='accepted'?(v.messages.filter(m=>m.from!==name).at(-1)?.id||0):0,updatedAt:v.updatedAt});
+    result.push({peer:chatPeer(acc,v.state==='accepted'),adminAddedBy:v.adminAddedBy||null,state:v.state,incoming:v.state==='pending'&&v.requester!==name,last:last?{text:last.text,at:last.at,from:last.from}:null,unread:v.state==='accepted'?v.messages.filter(m=>m.from!==name&&m.id>read).length:0,lastIncoming:v.state==='accepted'?(v.messages.filter(m=>m.from!==name).at(-1)?.id||0):0,updatedAt:v.updatedAt});
   }
   result.sort((a,b)=>Number(b.incoming)-Number(a.incoming)||b.updatedAt-a.updatedAt);
   return {items:result,unread:result.reduce((n,v)=>n+v.unread+(v.incoming?1:0),0)};
@@ -858,11 +896,22 @@ function chatOperation(name,p,body){
   if(!account)return err(404,'未找到该账号');
   let v=chatGet(name,peer);
   if(p==='request'){
-    if(v)return err(409,v.state==='accepted'?'已经是好友':'好友申请已存在');
+    const admin=isAdmin({username:name});
+    if(v){
+      if(v.state==='pending'&&admin){
+        v.state='accepted';v.adminAddedBy=name;v.updatedAt=Date.now();chatSave(v);
+        log('ADMIN_FRIEND_ADD '+JSON.stringify({actor:name,target:peer,at:v.updatedAt}));
+        return ok({ok:true,state:'accepted'});
+      }
+      return err(409,v.state==='accepted'?'已经是好友':'好友申请已存在');
+    }
     const files=chatFiles();
     if(files.length>=500||chatOwnFiles(name,files).length>=40||chatOwnFiles(peer,files).length>=40)return err(409,'好友或申请数量已达上限');
-    v={users:[name,peer].sort(),state:'pending',requester:name,updatedAt:Date.now(),messages:[],read:{[name]:0,[peer]:0}};
-    chatSave(v);return ok({ok:true});
+    v={users:[name,peer].sort(),state:admin?'accepted':'pending',requester:name,updatedAt:Date.now(),messages:[],read:{[name]:0,[peer]:0}};
+    if(admin)v.adminAddedBy=name;
+    chatSave(v);
+    if(admin)log('ADMIN_FRIEND_ADD '+JSON.stringify({actor:name,target:peer,at:v.updatedAt}));
+    return ok({ok:true,state:v.state});
   }
   if(!v||!v.users.includes(name)||!v.users.includes(peer))return err(403,'请先添加好友');
   if(p==='accept'||p==='reject'){
@@ -897,7 +946,7 @@ function chatRoute(req,res,url){
   const user=currentUser(req),p=url.pathname.slice(prefix.length),fail=(status,error)=>reply(res,status,{error});
   if(!user){fail(401,'请先登录');return true}
   try{
-    if(req.method==='GET'&&p==='list'){reply(res,200,chatList(user.username));return true}
+    if(req.method==='GET'&&p==='list'){if(req.headers['x-pro-presence']==='1'&&req.headers['sec-fetch-site']!=='cross-site')touchPresence(req);reply(res,200,chatList(user.username));return true}
     if(req.method==='GET'&&p==='messages'){
       const peer=url.searchParams.get('peer')||'',v=chatGet(user.username,peer);
       if(!v||v.state!=='accepted'||!v.users.includes(user.username)){fail(403,'只能查看自己的好友会话');return true}
@@ -905,7 +954,7 @@ function chatRoute(req,res,url){
       const before=url.searchParams.has('before')?Number(url.searchParams.get('before')):Infinity;
       if(before!==Infinity&&(!Number.isSafeInteger(before)||before<1)){fail(400,'分页无效');return true}
       const all=v.messages.filter(m=>m.id<before),messages=all.slice(-80).map(m=>({id:m.id,from:m.from,text:m.text,at:m.at}));
-      reply(res,200,{me:user.username,peer:accountPublic(acc),messages,peerRead:v.read[peer]||0,myRead:v.read[user.username]||0,hasOlder:all.length>80});return true;
+      reply(res,200,{me:user.username,peer:chatPeer(acc,true),messages,peerRead:v.read[peer]||0,myRead:v.read[user.username]||0,hasOlder:all.length>80});return true;
     }
     if(req.method!=='POST'||!['request','accept','reject','send','read'].includes(p)){fail(404,'接口不存在');return true}
     if(req.headers['x-pro-chat']!=='1'||req.headers['sec-fetch-site']==='cross-site'){fail(403,'无效请求');req.resume();return true}
@@ -1262,7 +1311,7 @@ server.listen(PORT,'127.0.0.1',()=>{
 });
 function shutdown(){stop=true;clearInterval(binanceTimer);clearInterval(okxTimer);
   clearTimeout(saveTimer);persistSignals();reviewHistory.save();paper.save();
-  clearInterval(signalLabTimer);clearInterval(shortBookTimer);shortStudy.flush();signalLab.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
+  clearInterval(signalLabTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();signalLab.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
   state.wsB?.close();
   server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),2000).unref();
 }

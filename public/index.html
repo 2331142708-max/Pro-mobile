@@ -121,6 +121,7 @@
 .chat-thread{display:flex;flex-direction:column;flex:1;min-height:0}.chat-messages{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:12px}.chat-older{display:block;margin:0 auto 12px;border:0;background:#dedede;color:#555;padding:7px 12px;border-radius:4px}.chat-message{display:flex;flex-direction:column;align-items:flex-start;margin:10px 0}.chat-message.mine{align-items:flex-end}.chat-time{font-size:11px;color:#777;margin:2px 0 5px}.chat-bubble{max-width:82%;white-space:pre-wrap;overflow-wrap:anywhere;background:white;color:#222;padding:10px 13px;border-radius:6px;line-height:1.55;font-size:15px}.chat-message.mine .chat-bubble{background:#95ec69}.chat-receipt{font-size:11px;color:#666;padding-top:4px}.chat-receipt.read{color:#087a42;font-weight:600}.chat-compose{display:flex;gap:8px;align-items:flex-end;padding:10px;background:#f7f7f7;border-top:1px solid #ddd;flex:none}.chat-compose textarea{flex:1;min-width:0;resize:none;border:1px solid #ddd;background:white;border-radius:5px;padding:9px;font:inherit;font-size:16px;max-height:90px;color:#222}.chat-compose button{background:#07a85b;color:#fff;border:0;border-radius:5px;padding:11px 15px;font-size:14px}
 @media(max-width:710px){.head-chat{font-size:0;padding:7px}.head-chat svg{width:23px;height:23px}.head-chat .chat-count{font-size:10px}.head{gap:5px}.head-right{flex:0 0 auto}.head-title{flex:1;min-width:0}.brand{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.chat-dialog{margin:0;width:100%;height:100dvh;max-height:100dvh;border-radius:0}.chat-header{padding-top:calc(12px + env(safe-area-inset-top))}.chat-compose{padding-bottom:calc(10px + env(safe-area-inset-bottom))}.chat-add input{font-size:16px}}
 </style>
+<style id="chat-presence-style">.chat-title-stack{display:flex;flex:1;min-width:0;flex-direction:column;align-items:center;gap:3px}.chat-title-stack strong{max-width:100%}.chat-title-stack small,.chat-row-info .chat-presence-label{font-size:11px;color:#888;font-weight:400}.chat-title-stack small[hidden]{display:none}.chat-title-stack small.is-online,.chat-row-info .chat-presence-label.is-online{color:#078c4c}.chat-presence-label{white-space:normal!important}.chat-title-stack small{line-height:1.3}.chat-admin-add-note{padding:6px 12px;color:#777;font-size:11px;line-height:1.5;background:#fff}</style>
 <style id="chat-sound-style">.me-sound{padding:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #eee}.me-sound strong{font-weight:500;font-size:15px}.me-sound small{display:block;color:#777;font-size:12px;margin-top:5px;line-height:1.5}.me-switch{position:relative;display:inline-flex;flex:none;width:46px;height:27px;cursor:pointer}.me-switch input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer}.me-switch span{pointer-events:none;width:100%;height:100%;border-radius:20px;background:#c6c6c6;transition:background .15s}.me-switch span:after{content:'';display:block;width:23px;height:23px;border-radius:50%;margin:2px;background:white;box-shadow:0 1px 3px #0002;transition:transform .15s}.me-switch input:checked+span{background:#07a85b}.me-switch input:checked+span:after{transform:translateX(19px)}.me-switch input:focus-visible+span{outline:2px solid #087a42;outline-offset:3px}</style>
 
 <style id="admin-moderation-style">
@@ -414,11 +415,11 @@ more.onclick=()=>load(false);document.querySelector('[data-pro-tab="circle"]').a
 </script>
 
 <dialog id="chatDialog" class="chat-dialog" aria-labelledby="chatTitle">
-  <div class="chat-header"><button id="chatBack" type="button" hidden>‹ 返回</button><strong id="chatTitle">聊天</strong><button id="chatClose" type="button">关闭</button></div>
+  <div class="chat-header"><button id="chatBack" type="button" hidden>‹ 返回</button><div class="chat-title-stack"><strong id="chatTitle">聊天</strong><small id="chatPeerPresence" hidden></small></div><button id="chatClose" type="button">关闭</button></div>
   <p class="chat-status" id="chatStatus" role="status"></p>
   <section id="chatListPane" class="chat-list-pane">
     <form class="chat-add" id="chatAddForm"><input id="chatAddName" type="text" required minlength="3" maxlength="24" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="输入好友的注册账号" aria-label="好友账号"><button type="submit" id="chatAddSend">添加好友</button></form>
-    <div id="chatList"><div class="chat-empty">正在读取好友列表…</div></div>
+    <div class="chat-admin-add-note" id="chatPresenceNotice">好友可查看在线状态及最后活跃时间；关闭或切换后台后约20秒显示离线。</div><div id="chatList"><div class="chat-empty">正在读取好友列表…</div></div>
   </section>
   <section id="chatThread" class="chat-thread" hidden>
     <div id="chatMessages" class="chat-messages" role="log" aria-label="聊天消息"></div>
@@ -430,22 +431,39 @@ more.onclick=()=>load(false);document.querySelector('[data-pro-tab="circle"]').a
 (function(){
 'use strict';
 const $=id=>document.getElementById(id),d=$('chatDialog'),status=$('chatStatus'),list=$('chatList'),messages=$('chatMessages'),badge=$('chatBadge');
+const chatAdmin=document.documentElement.dataset.proAdmin==='1';
+if(chatAdmin){$('chatAddSend').textContent='直接添加';$('chatPresenceNotice').textContent='管理员可直接添加好友，无需审批。双方成为好友后可查看在线及最后活跃时间。'}
 let peer=null,model=null,older=[],busy=false,threadBusy=false,listBusy=false,generation=0,sendId=null,sendText='',readPending=false;
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n};
 const say=t=>status.textContent=t;
 const format=t=>new Date(t).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
 async function api(endpoint,body){
-  const res=await fetch('/api/chat/'+endpoint,{cache:'no-store',credentials:'same-origin',...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Pro-Chat':'1'},body:JSON.stringify(body)})});
+  const res=await fetch('/api/chat/'+endpoint,{cache:'no-store',credentials:'same-origin',...(body===undefined?(endpoint==='list'&&document.visibilityState==='visible'?{headers:{'X-Pro-Presence':'1'}}:{}):{method:'POST',headers:{'Content-Type':'application/json','X-Pro-Chat':'1'},body:JSON.stringify(body)})});
   if(res.status===401){window.location.replace('/login');throw Error('登录已过期，请重新登录')}
   const data=await res.json();if(!res.ok)throw Error(data.error||'操作失败');return data;
 }
 function avatar(p){const n=el('div','chat-avatar',Array.from(p.nickname||'N')[0]);if(p.avatar&&/^\/api\/account\/avatar\/[a-z0-9_]{3,24}\?v=\d+$/.test(p.avatar)){const im=el('img');im.alt='头像';im.src=p.avatar;im.onerror=()=>{n.textContent=Array.from(p.nickname||'N')[0]};n.replaceChildren(im)}return n}
+
+function presenceText(p){
+  if(!p||!Number.isFinite(p.ageMs))return '暂无活跃记录';
+  if(p.online)return '● 在线';
+  const mins=Math.floor(p.ageMs/60000);
+  if(mins<1)return '刚刚在线';
+  if(mins<60)return mins+'分钟前在线';
+  if(mins<1440)return Math.floor(mins/60)+'小时前在线';
+  return Math.floor(mins/1440)+'天前在线';
+}
+function paintPeerPresence(p){
+  const n=$('chatPeerPresence');n.hidden=!p;n.textContent=p?presenceText(p):'';n.classList.toggle('is-online',!!p?.online);
+}
+
 function renderList(data){
   list.replaceChildren();
-  if(!data.items.length){list.append(el('div','chat-empty','还没有好友，输入对方的注册账号发送申请。'));return}
+  if(!data.items.length){list.append(el('div','chat-empty',chatAdmin?'还没有好友，输入注册账号直接添加。':'还没有好友，输入对方的注册账号发送申请。'));return}
   for(const item of data.items){
     const p=item.peer,row=el('div','chat-row'),info=el('div','chat-row-info'),side=el('div','chat-row-side');
-    info.append(el('strong','',p.nickname),el('small','',item.state==='accepted'?(item.last?.text||'点击开始聊天'):(item.incoming?'申请添加你为好友 · '+p.username:'等待对方同意 · '+p.username)));
+    info.append(el('strong','',p.nickname),el('small','',item.state==='accepted'?(item.last?.text||(item.adminAddedBy&&item.adminAddedBy!==document.documentElement.dataset.proAccount?'管理员已添加你为好友':'点击开始聊天')):(item.incoming?'申请添加你为好友 · '+p.username:'等待对方同意 · '+p.username)));
+    if(item.state==='accepted')info.append(el('small','chat-presence-label'+(p.presence?.online?' is-online':''),presenceText(p.presence)));
     const face=avatar(p);window.proAdminBind?.(face,p.username,p.nickname);row.append(face,info,side);
     if(item.state==='accepted'){
       row.tabIndex=0;row.setAttribute('role','button');row.onclick=()=>openThread(p);row.onkeydown=e=>{if(e.target===row&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openThread(p)}};if(item.unread)side.append(el('span','chat-unread',String(item.unread)));else if(item.last)side.append(el('span','',format(item.last.at)));
@@ -560,7 +578,7 @@ async function refreshThread(force=false){
   if(threadBusy||!peer||!d.open)return;threadBusy=true;const g=generation,name=peer.username;
   try{const data=await api('messages?peer='+encodeURIComponent(name));if(g!==generation||!d.open)return;
     const changed=!model||JSON.stringify(model.messages)!==JSON.stringify(data.messages)||model.peerRead!==data.peerRead;
-    model=data;if(changed||force)renderThread(data,force);await markVisible();
+    model=data;paintPeerPresence(data.peer?.presence);if(changed||force)renderThread(data,force);await markVisible();
   }catch(e){if(g===generation)say(e.message)}finally{threadBusy=false}
 }
 async function loadOlder(before){
@@ -570,10 +588,10 @@ async function loadOlder(before){
   }catch(e){if(g===generation)say(e.message)}finally{threadBusy=false}
 }
 function showList(){
-  generation++;peer=null;model=null;older=[];sendId=null;sendText='';$('chatText').value='';$('chatThread').hidden=true;$('chatListPane').hidden=false;$('chatBack').hidden=true;$('chatTitle').textContent='聊天 / 好友';say('');void refreshList();
+  generation++;peer=null;model=null;older=[];sendId=null;sendText='';$('chatText').value='';$('chatThread').hidden=true;$('chatListPane').hidden=false;$('chatBack').hidden=true;$('chatTitle').textContent='聊天 / 好友';paintPeerPresence(null);say('');void refreshList();
 }
 function openThread(p){
-  generation++;peer=p;model=null;older=[];sendId=null;sendText='';$('chatText').value='';$('chatTitle').textContent=p.nickname;$('chatListPane').hidden=true;$('chatThread').hidden=false;$('chatBack').hidden=false;messages.replaceChildren(el('div','chat-empty','正在读取消息…'));say('');void refreshThread(true);
+  generation++;peer=p;model=null;older=[];sendId=null;sendText='';$('chatText').value='';$('chatTitle').textContent=p.nickname;paintPeerPresence(p.presence||null);$('chatListPane').hidden=true;$('chatThread').hidden=false;$('chatBack').hidden=false;messages.replaceChildren(el('div','chat-empty','正在读取消息…'));say('');void refreshThread(true);
 }
 window.proOpenFriendChat=p=>{if(!d.open)d.showModal();openThread(p)};
 function openChat(add=false){
@@ -583,7 +601,7 @@ $('headChat').onclick=()=>openChat();$('meFriends').onclick=()=>openChat(true);$
 d.addEventListener('close',()=>{generation++;peer=null;model=null;older=[];$('chatText').value='';sendId=null;sendText='';void refreshList()});
 $('chatAddForm').onsubmit=async e=>{
   e.preventDefault();const b=$('chatAddSend');if(b.disabled)return;b.disabled=true;
-  try{await api('request',{peer:$('chatAddName').value.trim().toLowerCase()});$('chatAddName').value='';say('好友申请已发送');await refreshList()}catch(e){say(e.message)}finally{b.disabled=false}
+  try{const result=await api('request',{peer:$('chatAddName').value.trim().toLowerCase()});$('chatAddName').value='';say(result.state==='accepted'?'已直接添加好友':'好友申请已发送');await refreshList()}catch(e){say(e.message)}finally{b.disabled=false}
 };
 function messageId(){return 'm-'+Date.now()+'-'+Array.from(crypto.getRandomValues(new Uint8Array(12)),x=>x.toString(16).padStart(2,'0')).join('')}
 $('chatCompose').onsubmit=async e=>{
@@ -666,8 +684,9 @@ function render(){
   if(selected.username===me){action.textContent='自己的账号';action.disabled=true;status.textContent='这是你自己的个人资料。';return}
   if(relationship?.state==='accepted'){action.textContent='发送消息';status.textContent='你们已经是好友';action.disabled=busy;return}
   if(relationship?.state==='pending'&&relationship.incoming){action.textContent='同意好友申请';status.textContent='对方已经向你发送了好友申请';action.disabled=busy;return}
+  if(relationship?.state==='pending'&&document.documentElement.dataset.proAdmin==='1'){action.textContent='直接添加好友';status.textContent='管理员添加无需对方同意。';action.disabled=busy;return}
   if(relationship?.state==='pending'){action.textContent='等待对方同意';status.textContent='好友申请已发送';action.disabled=true;return}
-  action.textContent='添加好友';status.textContent='发送好友申请，对方同意后即可聊天。';action.disabled=busy;
+  const admin=document.documentElement.dataset.proAdmin==='1';action.textContent=admin?'直接添加好友':'添加好友';status.textContent=admin?'管理员添加无需对方同意。':'发送好友申请，对方同意后即可聊天。';action.disabled=busy;
 }
 async function load(g){
   try{
@@ -697,8 +716,8 @@ action.onclick=async()=>{
   }
   const g=generation,peer=selected.username;busy=true;action.disabled=true;
   try{
-    await api(relationship?.incoming?'accept':'request',{peer});
-    if(g===generation){relationship=relationship?.incoming?{state:'accepted',peer:selected}:{state:'pending',incoming:false,peer:selected};render();await load(g)}
+    const result=await api(relationship?.incoming?'accept':'request',{peer});
+    if(g===generation){relationship=relationship?.incoming||result.state==='accepted'?{state:'accepted',peer:selected}:{state:'pending',incoming:false,peer:selected};render();await load(g)}
   }catch(e){if(g===generation){await load(g);status.textContent=e.message}}
   finally{busy=false;if(g===generation&&dialog.open&&relationship?.state!=='pending'&&selected.username!==me)action.disabled=false}
 };
