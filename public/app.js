@@ -429,39 +429,49 @@
   }
 
 
+
   function swingStudies(v){
     const d=v.shortStudy;
-    const header='<section class="swing-card swing-study"><div class="swing-stage-caption">新增五模型 · 独立历史复核</div><h3>短时回升回落研究</h3>';
+    const header='<section class="swing-card swing-study"><h3>五模型 · 历史结果</h3>';
     if(!d?.supported)return header+'<p>'+esc(d?.reason||'等待研究接口')+'</p></section>';
     if(!Array.isArray(d.models)||d.models.length!==5)return header+'<p>研究数据尚未就绪</p></section>';
-    const f=x=>Number.isFinite(x)?swingNum(x,2)+'%':'—';
+    const f=x=>Number.isFinite(x)?swingNum(x,3)+'%':'—';
     const stamp=x=>Number.isFinite(x)&&x>0?new Date(x).toLocaleTimeString('zh-CN',{hour12:false}):'—';
     const rows=d.models.map((m,i)=>{
-      const status=esc(m.status||'等待样本');
-      const counts=Number.isFinite(m.samples)?m.samples:0;
-      const regime=m.code==='vwap'?'<p>震荡 / 方向性已完成样本：'+esc(m.byRegime?.['震荡']?.samples??0)+' / '+esc(m.byRegime?.['方向性']?.samples??0)+'</p>':'';
-      return '<div class="swing-study-item"><div class="swing-study-head"><b>'+String(i+1).padStart(2,'0')+' · '+esc(m.label)+'</b><small>'+status+'</small></div><p>'+esc(m.note)+'</p><div class="swing-study-grid"><div>已完成样本<strong>'+esc(counts)+'</strong></div><div>同向 / 反向 / 平坦<strong>'+esc(m.aligned??0)+' / '+esc(m.opposite??0)+' / '+esc(m.flat??0)+'</strong></div><div>历史平均同向变化<strong>'+f(m.mean)+'</strong></div><div>历史同向比例<strong>'+f(m.alignment)+'</strong></div></div><p>中断作废 '+esc(m.invalid??0)+' · 最近完成 '+stamp(m.lastCompletedAt)+'</p>'+regime+'</div>';
+      const counts=Number.isFinite(m.samples)?m.samples:0,last=m.lastCompleted;
+      const valid=last&&Number.isFinite(last.change)&&['回升','回落'].includes(last.direction);
+      const observed=valid?(last.change>.005?'同向':last.change<-.005?'反向':'平坦'):'暂无结果';
+      const risk=!d.enabled?'研究暂停':!d.fresh?'成交延迟/不足':m.code==='ofi'&&!d.bookFresh?'盘口待更新':counts===0?'样本不足':m.code==='ofi'?'快照近似':'规则未验证';
+      const note=valid?last.direction+'观察 · '+observed+' '+f(last.change):'尚无已完成观察';
+      const regime=m.code==='vwap'?'<p>震荡 / 方向性样本：'+esc(m.byRegime?.['震荡']?.samples??0)+' / '+esc(m.byRegime?.['方向性']?.samples??0)+'</p>':'';
+      return '<details class="swing-mini-model" data-swing-fold="model-'+esc(m.code)+'"><summary><div><b>'+String(i+1).padStart(2,'0')+' · '+esc(m.label)+'</b><small>'+esc(note)+'</small></div><span class="swing-mini-meta"><b>'+esc(counts)+'笔</b><small>'+esc(risk)+'</small></span></summary><div class="swing-mini-detail"><p>'+esc(m.status||'等待样本')+' · '+esc(m.note)+'</p><div class="swing-study-grid"><div>同向 / 反向 / 平坦<strong>'+esc(m.aligned??0)+' / '+esc(m.opposite??0)+' / '+esc(m.flat??0)+'</strong></div><div>历史同向比例<strong>'+f(m.alignment)+'</strong></div><div>平均同向变化<strong>'+f(m.mean)+'</strong></div><div>作废样本<strong>'+esc(m.invalid??0)+'</strong></div></div><p>最近完成 '+stamp(m.lastCompletedAt)+'</p>'+regime+'</div></details>';
     }).join('');
-    return header+'<p>BTCUSDT · 后续60秒的已完成价格观察。五类研究分别复核，不合成方向预测或入场信号。</p><p class="swing-study-status">'+(!d.enabled?'研究暂停':d.fresh?'成交采集正常':'成交数据待更新')+' · 最新成交 '+stamp(d.latestAt)+' · 盘口 '+(d.bookFresh?'快照有效':'待更新')+'</p>'+rows+'<p>同向比例并非交易胜率。规则尚未验证，OFI仅为买一卖一连续快照近似；样本不足或数据中断不输出推测值。</p></section>';
+    return header+'<p>BTCUSDT · 60秒历史观察 · '+(!d.enabled?'研究暂停':d.fresh?'成交采集正常':'数据待更新')+' · '+stamp(d.latestAt)+'</p>'+rows+'<p>最近完成结果不表示当前走势。各模型未校准风险概率；同向比例不是交易胜率。</p></section>';
   }
 
   function swingRender(v){
-    const body=$('swingBody');
-    const phase=v.ready?v.phase:null;
-    const labels={up_early:'已观察到回升起步',down_early:'已观察到回落起步',up_elapsed:'回升已发生 · 非起步',down_elapsed:'回落已发生 · 非起步',neutral:'尚未确认转折',waiting:'等待有效数据'};
-    const code=phase?.code||'waiting';
-    const stage=`<section class="swing-card swing-stage"><div class="swing-stage-caption">当前阶段 · 已发生行情识别</div><h3>${esc(labels[code]||labels.waiting)}</h3><p>${esc(phase?.reason||v.reason||'等待有效样本')}</p>${phase?.turnAt?`<div class="swing-grid"><div>采样转折时间<strong>${new Date(phase.turnAt).toLocaleTimeString('zh-CN',{hour12:false})}</strong></div><div>距转折约<strong>${phase.ageSeconds} 秒</strong></div><div>转折后实际变化<strong>${swingPct(phase.change)}</strong></div><div>研究识别门槛<strong>${swingPct(phase.threshold)}</strong></div></div>`:''}<p>仅识别已经发生的局部变化；不代表接下来仍会延续，不是开仓依据。</p></section>`;
+    const body=$('swingBody'),scroll=body.scrollTop,expanded=new Set([...body.querySelectorAll('details[open][data-swing-fold]')].map(x=>x.dataset.swingFold));
+    const phase=v.ready?v.phase:null,code=phase?.code||'waiting';
+    const observed=/^(up|down)_(early|elapsed)$/.test(code);
+    const early=observed&&code.endsWith('_early'),dir=observed?(code.startsWith('up')?'回升':'回落'):'';
+    const label=observed?dir+(early?' · 已观察起步':' · 已发生一段变化'):code==='neutral'?'尚未确认转折':'等待有效数据';
     const risk=v.risk||{level:!v.ready&&/延迟|断开|不可用|异常/.test(v.reason||'')?'high':'unknown',checks:[]};
-    const riskLabels={low:'低风险',medium:'中风险',high:'高风险',unknown:'风险未评估'};
+    const riskLabels={low:'已观测异常较少',medium:'中风险警示',high:'高风险警示',unknown:'风险未评估'};
     const level=Object.hasOwn(riskLabels,risk.level)?risk.level:'unknown';
-    const riskCard=`<section class="swing-card swing-risk swing-risk-${level}"><div class="swing-stage-caption">实时风险警示 · 只读模拟研究</div><h3>${riskLabels[level]}</h3><p>仅表示已观测风险项，不代表开仓安全；高风险项优先，缺数据不显示低风险。</p>${(risk.checks||[]).map(x=>`<div class="swing-risk-row"><div><b>${esc(x.name)}</b><small>${esc(x.note)}</small></div><span class="swing-risk-tag-${Object.hasOwn(riskLabels,x.level)?x.level:'unknown'}">${riskLabels[x.level]||riskLabels.unknown}</span></div>`).join('')}<p>研究阈值未校准 · 不提供入场或止损指令。</p></section>`;
-    const cards=[1,3,5].map(minutes=>{const r=v.periods?.find(x=>x.minutes===minutes);
-      return `<section class="swing-card"><h3>近 ${minutes} 分钟 · 已发生</h3>${!v.ready||!r?.ready?'<p>等待连续有效样本</p>':`<div class="swing-grid"><div>实际涨跌<strong>${swingPct(r.change)}</strong></div><div>较区间低点回升<strong>${swingPct(r.rebound)}</strong></div><div>较区间高点回落<strong>${swingPct(r.pullback)}</strong></div><div>主动买 / 卖<strong>${r.buyPct==null?'—':swingNum(r.buyPct,1)+'% / '+swingNum(100-r.buyPct,1)+'%'}</strong></div></div>${r.buyPct==null?'':sideBar(r.buyPct)}<p>区间采样高 / 低：${price(r.high)} / ${price(r.low)} · ${r.count} 条公开成交</p>`}</section>`;
+    const checks=Array.isArray(risk.checks)?risk.checks:[];
+    const alerts=checks.filter(x=>x.level==='high'||x.level==='medium').sort((a,b)=>Number(b.level==='high')-Number(a.level==='high'));
+    const riskSummary=alerts.length?alerts.slice(0,3).map(x=>esc(x.name)).join(' · '):level==='unknown'?'证据不足，不能判断风险':level==='low'?'仅代表已观测项目':'详见风险复核';
+    const riskCard='<details class="swing-card swing-risk swing-risk-'+level+'" data-swing-fold="risk"><summary class="swing-risk-summary"><div><div class="swing-stage-caption">已观测风险</div><h3>'+riskLabels[level]+'</h3><p>'+riskSummary+'</p></div><span class="swing-fold-hint">详情 ›</span></summary>'+checks.map(x=>'<div class="swing-risk-row"><div><b>'+esc(x.name)+'</b><small>'+esc(x.note)+'</small></div><span class="swing-risk-tag-'+(Object.hasOwn(riskLabels,x.level)?x.level:'unknown')+'">'+(riskLabels[x.level]||riskLabels.unknown)+'</span></div>').join('')+'<p>仅评估已观测异常，不代表开仓安全或未来亏损概率。</p></details>';
+    const stage='<section class="swing-card swing-stage swing-compact-stage"><div class="swing-stage-caption">原 SSR · 已发生阶段</div><h3>'+esc(label)+'</h3><div class="swing-stage-strip"><div><b>前</b><small>不提前确认</small></div><div class="'+(observed?'swing-stage-active':'')+'"><b>中</b><small>'+esc(observed?(early?'已观察起步':'已发生变化'):'尚未确认')+'</small></div><div><b>后</b><small>结束未确认</small></div></div>'+(observed?'<div class="swing-stage-foot">距采样转折 '+esc(phase.ageSeconds)+'秒 · 已发生变化 '+swingPct(phase.change)+'</div>':'')+'<p>'+esc(phase?.reason||v.reason||'等待有效样本')+'</p></section>';
+    const rows=[1,3,5].map(minutes=>{const r=v.periods?.find(x=>x.minutes===minutes);
+      return '<tr><td>'+minutes+'分钟</td><td>'+ (v.ready&&r?.ready?swingPct(r.change):'—')+'</td><td>'+(v.ready&&r?.ready?swingPct(r.rebound):'—')+'</td><td>'+(v.ready&&r?.ready?swingPct(r.pullback):'—')+'</td><td>'+(v.ready&&r?.ready&&r.buyPct!=null?swingNum(r.buyPct,1)+'%':'—')+'</td></tr>';
     }).join('');
-    const blocks=v.ready&&v.blocks?.length?v.blocks.map(x=>`<div class="swing-history-row"><span>${tm(x.from)}–${tm(x.to)}</span><b>${swingPct(x.change)} / ${swingPct(x.range)}</b></div>`).join(''):'<p>连续样本不足</p>';
-    body.innerHTML=`<div class="swing-kicker">${esc(v.symbol||store.symbol)} · ${esc(v.exchangeLabel||'')} · 只读研究</div><div class="swing-price" id="swingLivePrice">—</div><p id="swingQuoteStatus">等待独立公开报价</p><p style="font-size:12px">统计采样：${esc(v.reason||'等待成交')} ${v.ready?'· '+new Date(v.latestAt).toLocaleTimeString('zh-CN',{hour12:false}):''}</p>${stage}${swingStudies(v)}${riskCard}${cards}<section class="swing-card"><h3>历史5分钟区间复核</h3><p>已发生的区间涨跌 / 高低振幅（非胜率）</p>${blocks}</section><p>使用公开成交的每秒末价采样，不是完整盘口或最高最低成交价。不生成未来方向、入场信号或盈利概率；与原2H模型独立。</p>`;
-    renderSwingQuote();
+    const blocks=v.ready&&v.blocks?.length?v.blocks.map(x=>'<div class="swing-history-row"><span>'+tm(x.from)+'–'+tm(x.to)+'</span><b>'+swingPct(x.change)+' / '+swingPct(x.range)+'</b></div>').join(''):'<p>连续样本不足</p>';
+    body.innerHTML='<div class="swing-kicker">'+esc(v.symbol||store.symbol)+' · '+esc(v.exchangeLabel||'')+' · 只读研究</div><div class="swing-price" id="swingLivePrice">—</div><p id="swingQuoteStatus">等待独立公开报价</p>'+riskCard+stage+swingStudies(v)+'<details class="swing-card" data-swing-fold="periods"><summary><b>1 / 3 / 5分钟实际变化</b><span class="swing-fold-hint">详情 ›</span></summary><div class="swing-table-scroll"><table class="swing-mini-table"><thead><tr><th>周期</th><th>涨跌</th><th>回升</th><th>回落</th><th>主动买</th></tr></thead><tbody>'+rows+'</tbody></table></div></details><details class="swing-card" data-swing-fold="history"><summary><b>历史5分钟区间复核</b><span class="swing-fold-hint">详情 ›</span></summary><p>已发生区间涨跌 / 振幅</p>'+blocks+'</details><p class="swing-compact-note">公开成交采样 · 与2H主模型独立。不生成未来方向、入场指令或盈利概率。</p>';
+    for(const x of body.querySelectorAll('details[data-swing-fold]'))x.open=expanded.has(x.dataset.swingFold);
+    body.scrollTop=scroll;renderSwingQuote();
   }
+
   async function refreshSwing(){if(!swingDialog.open||swingBusy)return;const generation=swingGeneration,symbol=store.symbol;swingBusy=true;
     try{const v=await get('/api/pro2/swing?symbol='+encodeURIComponent(symbol));if(swingDialog.open&&generation===swingGeneration&&symbol===store.symbol)swingRender(v)}catch{if(swingDialog.open&&generation===swingGeneration)swingRender({symbol,ready:false,reason:'数据接口暂不可用，停止统计'})}finally{swingBusy=false}}
   $('swingOpen').addEventListener('click',()=>{if(swingDialog.open)return;swingGeneration++;swingRender({symbol:store.symbol,ready:false,reason:'等待真实成交'});swingQuote=null;swingDialog.showModal();void refreshSwingQuote();void refreshSwing();swingTimer=setInterval(refreshSwing,2000);quoteTimer=setInterval(refreshSwingQuote,500);quoteAgeTimer=setInterval(renderSwingQuote,250)});

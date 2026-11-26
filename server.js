@@ -1252,7 +1252,7 @@ function swingStudySummary(symbol,study,now=Date.now()){
     models:d.models.map(m=>{
       const last=d.history.find(x=>x.code===m.code&&x.reason==='complete');
       return {code:m.code,label:m.label,note:m.note,status:!d.enabled?'研究已暂停':!fresh?'等待新鲜公开成交':m.code==='ofi'&&!bookFresh?'等待有效盘口快照':m.status,
-        samples:m.samples,aligned:m.aligned,opposite:m.opposite,flat:m.flat,invalid:m.invalid,mean:m.mean,alignment:m.alignment,lastCompletedAt:last?.endAt||null,
+        samples:m.samples,aligned:m.aligned,opposite:m.opposite,flat:m.flat,invalid:m.invalid,mean:m.mean,alignment:m.alignment,lastCompletedAt:last?.endAt||null,lastCompleted:last&&Number.isFinite(last.change)?{direction:last.direction,change:last.change,endAt:last.endAt}:null,
         byRegime:m.code==='vwap'?m.byRegime:undefined};
     })};
 }

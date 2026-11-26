@@ -8,7 +8,7 @@
   <title>合约实时数据Pro v9代 · 南柯一梦制作</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css?v=pro4-classic-v9-five">
-  <script src="/app.js?v=pro-v9-swing-five-review" defer></script>
+  <script src="/app.js?v=pro-v9-swing-compact" defer></script>
 
   <style id="wechat-layout-v1">
     :root{--bg:#ededed;--paper:#fff;--text:#171717;--muted:#666;--border:#e8e8e8;--blue:#3275c9;--green:#079657;--red:#d34a50;--shadow:none;--accent:#07a85b}
@@ -154,6 +154,10 @@
 @media(max-width:710px){.signal-lab{margin:0;padding:15px 12px;border-radius:0}.lab-cards{grid-template-columns:1fr}.lab-card{padding:14px}.lab-row{font-size:13px}}
 </style>
 <style id="swing-study-style">.swing-study-item{border-top:1px solid #dce3ed;padding:12px 0}.swing-study-item:last-of-type{padding-bottom:0}.swing-study-head{display:flex;flex-direction:column;gap:4px}.swing-study-head b{font-size:14px;color:#26354b}.swing-study-head small{font-size:11px;color:#64748b}.swing-study-item p,.swing-study-status{font-size:12px!important;line-height:1.5}.swing-study-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11px;color:#64748b}.swing-study-grid strong{display:block;font-size:15px;color:#28374d;margin-top:3px;font-variant-numeric:tabular-nums}</style>
+<style id="swing-compact-layout">
+#swingBody .swing-card{padding:12px;margin:9px 0}#swingBody .swing-card h3{font-size:16px;margin:5px 0}#swingBody .swing-card p{font-size:12px;line-height:1.5;margin:6px 0}#swingBody .swing-price{font-size:30px;margin:4px 0}#swingBody #swingQuoteStatus{font-size:11px;margin:5px 0 10px}#swingBody details>summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px}#swingBody details>summary::-webkit-details-marker{display:none}.swing-fold-hint{font-size:11px;color:#778399;white-space:nowrap}.swing-risk-summary h3{margin:4px 0!important}.swing-risk-summary p{margin:0!important}.swing-stage-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:10px 0}.swing-stage-strip>div{background:#f1f3f7;border:1px solid #dfe4ec;padding:9px 4px;text-align:center;border-radius:6px}.swing-stage-strip b,.swing-stage-strip small{display:block}.swing-stage-strip b{font-size:14px}.swing-stage-strip small{font-size:10px;color:#67748a;margin-top:4px}.swing-stage-strip .swing-stage-active{background:#e5edf6;border-color:#a6b7d1}.swing-stage-foot{font-size:12px;color:#3c506b}.swing-mini-model{border-top:1px solid #dce3ed;padding:9px 0}.swing-mini-model summary>div{flex:1;min-width:0}.swing-mini-model b{display:block;font-size:13px}.swing-mini-model small{display:block;color:#67748a;font-size:11px;line-height:1.45;margin-top:3px;overflow-wrap:anywhere}.swing-mini-meta{text-align:right;max-width:43%;flex:none}.swing-mini-meta small{color:#926b38}.swing-mini-detail{padding-top:7px}.swing-table-scroll{overflow:auto}.swing-mini-table{width:100%;border-collapse:collapse;font-size:11px;white-space:nowrap;margin-top:10px}.swing-mini-table th,.swing-mini-table td{padding:8px 3px;text-align:right;border-bottom:1px solid #dce3ed}.swing-mini-table th:first-child,.swing-mini-table td:first-child{text-align:left}.swing-compact-note{font-size:11px;color:#778399}
+</style>
+<style id="lab-compact-details">.lab-compact-detail{margin-top:7px;font-size:12px}.lab-compact-detail summary{color:#667282;cursor:pointer;padding:6px 0}.lab-card h4{margin-bottom:6px}.lab-card p{font-size:11px;line-height:1.4}</style>
 </head>
 <body data-pro-view="market">
 <div class="shell">
@@ -923,14 +927,16 @@ function renderShortStudy(d){
   const fresh=d.latestAt&&d.serverAt-d.latestAt<=6000;
   st.textContent=!d.enabled?'已暂停：'+(d.error||'未启用'):(fresh?'真实成交持续采集 · ':'等待有效成交 · ')+stamp(d.latestAt);
   const pct=x=>Number.isFinite(x)?x.toFixed(3)+'%':'样本不足';
+  const expanded=new Set([...box.querySelectorAll('details[open][data-lab-fold]')].map(x=>x.dataset.labFold));
   box.replaceChildren(...d.models.map((m,i)=>{
     const c=el('section',undefined,'lab-card');
     c.append(el('h4',String(i+5).padStart(2,'0')+' · '+m.label),el('p',m.note),el('p',fresh?m.status:'等待最新成交'));
     line(c,'已完成观察',String(m.samples));line(c,'同向 / 反向 / 基本不变',m.aligned+' / '+m.opposite+' / '+m.flat);
-    line(c,'60秒平均同向变化',pct(m.mean));line(c,'同向比例（非胜率）',m.samples?m.alignment.toFixed(1)+'%':'样本不足');
-    line(c,'正在观察 / 作废',String(m.active?1:0)+' / '+m.invalid);
-    for(const k of ['回升','回落']){const x=m.byDirection[k];line(c,k+'样本 / 平均变化',x?x.samples+' / '+pct(x.mean):'0 / —')}
-    if(m.code==='vwap')for(const k of ['震荡','方向性']){const x=m.byRegime[k];line(c,k+'样本 / 平均变化',x?x.samples+' / '+pct(x.mean):'0 / —')}
+    const fold=el('details',undefined,'lab-compact-detail');fold.dataset.labFold=m.code;fold.open=expanded.has(m.code);fold.append(el('summary','更多历史统计'));c.append(fold);
+    line(fold,'60秒平均同向变化',pct(m.mean));line(fold,'同向比例（非胜率）',m.samples?m.alignment.toFixed(1)+'%':'样本不足');
+    line(fold,'正在观察 / 作废',String(m.active?1:0)+' / '+m.invalid);
+    for(const k of ['回升','回落']){const x=m.byDirection[k];line(fold,k+'样本 / 平均变化',x?x.samples+' / '+pct(x.mean):'0 / —')}
+    if(m.code==='vwap')for(const k of ['震荡','方向性']){const x=m.byRegime[k];line(fold,k+'样本 / 平均变化',x?x.samples+' / '+pct(x.mean):'0 / —')}
     return c;
   }));
   const names={complete:'已完成',gap:'断流作废',restart:'重启作废'};
@@ -950,13 +956,14 @@ async function refresh(){
     const d=await r.json();if(!Array.isArray(d.accounts)||d.accounts.length!==4||!Array.isArray(d.history))throw Error('结果格式不正确');
     status.textContent=!d.enabled?'已暂停：'+(d.error||'未启用'):d.latestAt&&d.serverAt-d.latestAt<=6000?'正在采集公开成交 · '+stamp(d.latestAt):'等待新鲜公开成交 · 无有效价格时不产生样本';
     $('signalLabStarted').textContent='研究开始：'+stamp(d.startedAt)+' · 数据读取：'+stamp(d.serverAt);
+    const oldExpanded=new Set([...cards.querySelectorAll('details[open][data-lab-fold]')].map(x=>x.dataset.labFold));
     cards.replaceChildren(...d.accounts.map(a=>{
       const c=el('section',undefined,'lab-card');
       c.append(el('h4',a.label),el('div',money(a.balance)+' U','lab-balance'));
       line(c,'理论累计盈亏',signed(a.net)+' U');line(c,'触及止盈 / 止损',a.wins+' / '+a.losses);
-      line(c,'已完成样本',String(a.wins+a.losses));line(c,'理论胜率',a.winRate==null?'样本不足':money(a.winRate)+'%');
-      line(c,'进行中 / 占用虚拟保证金',a.active+' / '+money(a.reserved)+' U');line(c,'中断作废 / 跳过',a.invalid+' / '+a.skipped);
-      line(c,'最大已结算回撤',money(a.maxDrawdown)+' U');line(c,'穿越价格累计盈亏',signed(a.observedNet)+' U');return c;
+      line(c,'已完成样本',String(a.wins+a.losses));const fold=el('details',undefined,'lab-compact-detail');fold.dataset.labFold=a.code;fold.open=oldExpanded.has(a.code);fold.append(el('summary','更多历史统计'));c.append(fold);line(fold,'理论胜率',a.winRate==null?'样本不足':money(a.winRate)+'%');
+      line(fold,'进行中 / 占用虚拟保证金',a.active+' / '+money(a.reserved)+' U');line(fold,'中断作废 / 跳过',a.invalid+' / '+a.skipped);
+      line(fold,'最大已结算回撤',money(a.maxDrawdown)+' U');line(fold,'穿越价格累计盈亏',signed(a.observedNet)+' U');return c;
     }));
     renderShortStudy(d.shortStudy);
     const names={tp:'触及止盈',sl:'触及止损',gap:'断流作废',restart:'重启作废'};
