@@ -1583,6 +1583,36 @@ function swingStudySummary(symbol,study,now=Date.now()){
     })};
 }
 
+// Lightweight public catalog, intentionally separate from the five-symbol research engine.
+const catalogVenues=[{key:'binance',label:'币安U本位',base:BINANCE,api:'/fapi/v1',prefix:''},{key:'binance_coin',label:'币安币本位',base:'https://dapi.binance.com',api:'/dapi/v1',prefix:'COIN:'}];
+const publicCatalog=new Map();let catalogTimer=null,catalogBusy=false;
+function catalogRows(venue,info,tickers,t){
+  if(!Array.isArray(info?.symbols)||!Array.isArray(tickers))throw Error('invalid catalog');
+  const tick=new Map(tickers.map(x=>[x.symbol,x]));
+  return info.symbols.filter(x=>(x.status||x.contractStatus)==='TRADING'&&x.contractType&&x.contractType!=='NONE').map(x=>{
+    const q=tick.get(x.symbol),px=Number(q?.lastPrice),chg=Number(q?.priceChangePercent),at=Number(q?.closeTime);
+    return {symbol:venue.prefix+x.symbol,displaySymbol:x.symbol,exchange:venue.key,exchangeLabel:venue.label,quoteAsset:x.quoteAsset||'',contractType:x.contractType,price:Number.isFinite(px)&&px>0?px:null,change24h:Number.isFinite(chg)?chg:null,priceAt:Number.isFinite(at)&&at>0?at:0,quoteVolume24h:venue.key==='binance'?Number(q?.quoteVolume)||0:0,ready:false,selected:false,multi:false,matches:[],direction:'neutral',quoteOnly:true,reason:'仅公开行情 · 未运行研究模型',stale:!Number.isFinite(at)||t-at>45000||at>t+1000};
+  });
+}
+async function refreshPublicCatalog(){
+  if(stop||catalogBusy)return;catalogBusy=true;
+  try{await Promise.all(catalogVenues.map(async v=>{
+    const prev=publicCatalog.get(v.key),t=Date.now();
+    try{
+      const info=prev?.info&&t-prev.infoAt<300000?prev.info:await json(v.base+v.api+'/exchangeInfo',10000);
+      const tick=await json(v.base+v.api+'/ticker/24hr',10000),now=Date.now();
+      const rows=catalogRows(v,info,tick,now);
+      if(!rows.length)throw Error('empty trading catalog');
+      publicCatalog.set(v.key,{info,infoAt:info===prev?.info?prev.infoAt:now,rows,at:now,error:false});
+    }catch{publicCatalog.set(v.key,{...prev,error:true});}
+  }));}finally{catalogBusy=false}
+}
+function fullMarketSnapshot(core,now=Date.now()){
+  const rows=new Map(core.symbols.map(x=>[x.symbol,x]));
+  for(const v of catalogVenues){const cache=publicCatalog.get(v.key);for(const x of cache?.rows||[]){if(!rows.has(x.symbol))rows.set(x.symbol,{...x,stale:!!x.stale||now-x.priceAt>45000||now-x.at>45000});}}
+  return {...core,symbols:[...rows.values()],catalog:{count:rows.size,researchCount:core.counts.eligible,venues:catalogVenues.map(v=>({label:v.label,count:publicCatalog.get(v.key)?.rows?.length||0,at:publicCatalog.get(v.key)?.at||0,error:!!publicCatalog.get(v.key)?.error}))}};
+}
+
 const server=http.createServer((req,res)=>{
   let url;try{url=new URL(req.url,'http://localhost')}catch{return reply(res,400,{error:'无效请求'})}
   if(!accessGate(req,res,url))return;
@@ -1594,7 +1624,7 @@ const server=http.createServer((req,res)=>{
   if(req.method!=='GET')return reply(res,405,{error:'只允许GET；无交易/下单API'});
   if(url.pathname==='/api/ui-error'){log('PRO_FRONTEND_ERROR '+(url.searchParams.get('message')||'unknown').slice(0,200));return reply(res,200,{ok:true})}
   if(url.pathname==='/api/pro2/signal-lab')return reply(res,200,{...signalLab.snapshot(),shortStudy:shortStudy.snapshot()});
-  if(url.pathname==='/api/pro2/snapshot')return reply(res,200,pro2.snapshot(pro2Trades));
+  if(url.pathname==='/api/pro2/snapshot')return reply(res,200,fullMarketSnapshot(pro2.snapshot(pro2Trades)));
   if(url.pathname==='/api/pro2/flow-health')return reply(res,200,pro2Trades.health());
   if(url.pathname==='/api/pro2/detail'){
     const symbol=(url.searchParams.get('symbol')||'').toUpperCase();
@@ -1640,7 +1670,7 @@ const server=http.createServer((req,res)=>{
   });
 });
 server.listen(PORT,'127.0.0.1',()=>{
-  pro2.start();pro2Trades.start();signalLab.flush();shortStudy.flush();swingFollow.flush();horizonAudit.flush();trendReviewTimer=setInterval(sampleTrendReview,15000);trendReviewTimer.unref?.();void sampleTrendReview();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
+  pro2.start();pro2Trades.start();void refreshPublicCatalog();catalogTimer=setInterval(refreshPublicCatalog,15000);catalogTimer.unref?.();signalLab.flush();shortStudy.flush();swingFollow.flush();horizonAudit.flush();trendReviewTimer=setInterval(sampleTrendReview,15000);trendReviewTimer.unref?.();void sampleTrendReview();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
   log(`合约实时数据Pro v9代 本地运行: http://localhost:${PORT}`);
   if(ENABLE_LEGACY)stopPatternFeed=startPatternFeed({markets:MARKETS,json,binance:BINANCE,okx:OKX,
     okxWs:OKX_WS,stopped:()=>stop,log});
@@ -1652,7 +1682,7 @@ server.listen(PORT,'127.0.0.1',()=>{
 });
 function shutdown(){stop=true;clearInterval(binanceTimer);clearInterval(okxTimer);
   clearTimeout(saveTimer);persistSignals();reviewHistory.save();paper.save();
-  clearInterval(signalLabTimer);clearInterval(trendReviewTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();signalLab.flush();swingFollow.flush();horizonAudit.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
+  clearInterval(signalLabTimer);clearInterval(catalogTimer);clearInterval(trendReviewTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();signalLab.flush();swingFollow.flush();horizonAudit.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
   state.wsB?.close();
   server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),2000).unref();
 }

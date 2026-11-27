@@ -12,9 +12,9 @@
   const store={classicOpen:false,snap:null,detail:null,symbol:'BTCUSDT',filter:'all',exchange:'all',query:'',max:100,pins:new Set(),favorites:new Set(),favoriteMeta:{},lastDetail:0,fetching:false,errors:0};
   const accountKey=key=>'pro-account:'+document.documentElement.dataset.proAccount+':'+key;
   function read(key,fallback){try{const value=JSON.parse(localStorage.getItem(accountKey(key)));return value??fallback}catch{return fallback}}
-  const five=new Set(['BTCUSDT','BTCUSDC','ETHUSDT','ETHUSDC','ZECUSDT']);
-  store.pins=new Set(read('nk-pro2-pinned',[]).filter(x=>five.has(x)));store.favorites=new Set(read('contract-lens-pro-favorites-v1',[]).filter(x=>five.has(x)));
-  store.favoriteMeta=Object.fromEntries(Object.entries(read('nk-pro2-favorite-meta',{})).filter(([x])=>five.has(x)));
+  const validMarketKey=x=>typeof x==='string'&&x.length<=80&&x.length>0&&!/[\x00-\x1f]/.test(x);
+  store.pins=new Set(read('nk-pro2-pinned',[]).filter(x=>validMarketKey(x)));store.favorites=new Set(read('contract-lens-pro-favorites-v1',[]).filter(x=>validMarketKey(x)));
+  store.favoriteMeta=Object.fromEntries(Object.entries(read('nk-pro2-favorite-meta',{})).filter(([x])=>validMarketKey(x)));
   store.favoriteDiff={};
   function save(){try{localStorage.setItem(accountKey('nk-pro2-pinned'),JSON.stringify([...store.pins]));localStorage.setItem(accountKey('contract-lens-pro-favorites-v1'),JSON.stringify([...store.favorites]));localStorage.setItem(accountKey('nk-pro2-favorite-meta'),JSON.stringify(store.favoriteMeta));}catch{toast('浏览器未能保存自选设置')}}
   let toastTimer;
@@ -27,15 +27,14 @@
   async function get(url){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),13000);
     try{const res=await fetch(url,{cache:'no-store',signal:controller.signal});if(res.status===401){window.location.replace('/login');throw Error('登录已失效')}if(!res.ok)throw Error('HTTP '+res.status);return await res.json()}finally{clearTimeout(timer)}}
   function renderOverview(){const s=store.snap;if(!s)return;const c=s.counts;
-    $('totalCount').textContent=c.eligible.toLocaleString();$('upCount').textContent=c.up;$('downCount').textContent=c.down;$('multiCount').textContent=c.multiple;
+    $('totalCount').textContent=(s.catalog?.count??c.eligible).toLocaleString();$('upCount').textContent=c.up;$('downCount').textContent=c.down;$('multiCount').textContent=c.multiple;
     $('readyHero').textContent=c.ready.toLocaleString();$('totalHero').textContent=c.eligible.toLocaleString();
     $('scanProgress').style.width=(c.eligible?Math.min(100,c.ready/c.eligible*100):0)+'%';
     $('scanHint').textContent=`已获取 ${c.loaded} 份 2H 历史 · 通过收盘完整性检查 ${c.ready} 份`;
     $('updated').textContent=tm(s.serverTime);$('live').classList.toggle('good',c.eligible>0);
     $('live').innerHTML='<i></i>'+(c.eligible?'行情接口在线':'等待行情目录');
     $('notice').classList.toggle('warning',c.ready===0);
-    $('noticeText').textContent=c.eligible===0?'等待币安五个指定合约目录...':c.ready===0?'已获取合约目录，但2小时已收盘历史K线尚未加载完成；不输出方向信号。':
-      `已检查 ${c.ready}/${c.eligible} 个合约的连续2小时已收盘K线。未检查、盘口过期与行情断线的合约不会进入精选。历史加载可能需要数分钟。`;
+    $('noticeText').textContent='全部行情 '+(s.catalog?.count??c.eligible)+' 个 · 研究合约 '+c.ready+'/'+c.eligible+' 个已就绪。新增合约仅显示公开报价。'+(s.catalog?.venues||[]).filter(v=>v.error||!v.at||s.serverTime-v.at>45000).map(v=>' '+v.label+'目录待更新。').join('');
     const v=s.verification||{};
     $('alignment').textContent=v.samples>=30?`${n(100*v.aligned/v.samples,1)}%`:'样本不足';
     $('sampleCount').textContent=v.samples||0;$('pendingCount').textContent=v.pending||0;
@@ -58,7 +57,7 @@
   }
   function row(m){const pinned=store.pins.has(m.symbol),faved=store.favorites.has(m.symbol),name=m.displaySymbol||m.symbol;
     const tags=m.matches?.flatMap(h=>h.names.slice(0,3).map(x=>`<span class="tag ${cls(h.direction)}">${esc(x)}</span>`))||[];
-    const signal=tags.length?tags.slice(0,4).join(''):'<span class="tag">'+(m.ready?'未命中形态':'待2H数据')+'</span>';
+    const signal=tags.length?tags.slice(0,4).join(''):'<span class="tag">'+(m.quoteOnly?'公开行情':m.ready?'未命中形态':'待2H数据')+'</span>';
     const meta=store.favoriteMeta[m.symbol],diff=meta?.price>0&&m.price>0?`收藏价 ${price(meta.price)} · 变化 ${n((m.price/meta.price-1)*100,2)}%`:'';
     const trade=m.trade;
     const coverage=trade?.covered?`100万${esc(m.quoteAsset||'USDT')}聚合成交 买 ${amount(trade.buy)} / 卖 ${amount(trade.sell)}`:'大额成交：未监测';
@@ -70,7 +69,7 @@
       </div><div class="row-meta"><span class="venue">${esc(m.exchangeLabel)}</span>${signal}</div>
       <div class="market-sub">${m.ready?'2H收盘 '+tm(m.closedAt):esc(m.reason||'待真实K线')}${diff?' · '+esc(diff):''}</div>
       <div class="market-sub">${esc(coverage)}</div></div>
-      <div class="market-side"><div class="market-price">${price(m.price)}</div><div class="market-change ${m.change24h>=0?'positive':'negative'}">${m.stale?'报价待更新':(m.change24h>=0?'+':'')+n(m.change24h)+'%'}</div><div class="market-dir ${cls(m.direction)}">${direction(m.direction)}</div></div>
+      <div class="market-side"><div class="market-price">${price(m.price)}</div><div class="market-change ${m.change24h>=0?'positive':'negative'}">${m.stale?'报价待更新':m.change24h==null?'—':(m.change24h>=0?'+':'')+n(m.change24h)+'%'}</div><div class="market-dir ${cls(m.direction)}">${m.quoteOnly?'仅行情':direction(m.direction)}</div></div>
     </article>`;
   }
   function renderMarkets(){const all=activeRows(),shown=all.slice(0,store.max);
@@ -372,7 +371,7 @@
   async function refresh(){if(store.fetching)return;store.fetching=true;
     try{const data=await get('/api/pro2/snapshot');if(!data||data.intervalMinutes!==120)throw Error('返回的不是2小时信号接口');
       store.snap=data;store.errors=0;
-      if(!data.symbols.some(x=>x.symbol===store.symbol)&&data.symbols.length){store.symbol=data.symbols.find(x=>x.symbol==='BTCUSDT')?.symbol||data.symbols[0].symbol;store.lastDetail=0}
+      if(!data.symbols.some(x=>!x.quoteOnly&&x.symbol===store.symbol)&&data.symbols.some(x=>!x.quoteOnly)){store.symbol=data.symbols.find(x=>!x.quoteOnly&&x.symbol==='BTCUSDT')?.symbol||data.symbols.find(x=>!x.quoteOnly).symbol;store.lastDetail=0}
       renderOverview();renderMarkets();renderAlerts();
       if(Date.now()-store.lastDetail>4000)void refreshDetail();
     }catch(e){store.errors++;$('live').classList.remove('good');$('live').innerHTML='<i></i>数据待连接';
@@ -385,7 +384,7 @@
   $('more').addEventListener('click',()=>{store.max+=100;renderMarkets()});
   $('markets').addEventListener('click',e=>{const pin=e.target.closest('[data-pin]');if(pin){e.stopPropagation();togglePin(pin.dataset.pin);return}
     const fav=e.target.closest('[data-fav]');if(fav){e.stopPropagation();toggleFavorite(fav.dataset.fav);return}
-    const item=e.target.closest('[data-row]');if(!item)return;store.symbol=item.dataset.row;store.lastDetail=0;renderMarkets();openClassicModal();void refreshDetail();
+    const item=e.target.closest('[data-row]');if(!item)return;const market=store.snap?.symbols?.find(x=>x.symbol===item.dataset.row);if(market?.quoteOnly){toast(''+market.displaySymbol+' · 仅公开行情，未启用详细研究');return}store.symbol=item.dataset.row;store.lastDetail=0;renderMarkets();openClassicModal();void refreshDetail();
     if(window.innerWidth<1050)$('detailSection').scrollIntoView({block:'start',behavior:'smooth'});
   });
   $('markets').addEventListener('keydown',e=>{if(e.target.closest('button'))return;if(e.key==='Enter'||e.key===' '){e.preventDefault();e.target.closest('[data-row]')?.click()}});
