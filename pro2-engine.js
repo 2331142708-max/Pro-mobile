@@ -50,7 +50,7 @@ function createPro2({markets,json,binance,okx,log,stopped,dataDir,allowedSymbols
   const file=path.join(dataDir,allowedSymbols?'pro2-alerts-five.json':'pro2-alerts.json');
   const source=allowedSymbols&&!fs.existsSync(file)?path.join(dataDir,'pro2-alerts.json'):file;
   let alerts=[];
-  try{const found=JSON.parse(fs.readFileSync(source,'utf8'));if(Array.isArray(found))alerts=found.filter(x=>x&&x.version===VERSION&&(!allowedSymbols||allowedSymbols.includes(x.symbol))).slice(-MAX_ALERTS)}catch{}
+  try{const found=JSON.parse(fs.readFileSync(source,'utf8'));if(Array.isArray(found))alerts=found.filter(x=>x&&x.version===VERSION).slice(-MAX_ALERTS)}catch{}
   let timer=null,checking=false,sequence=0,lastFetch=0,failCount=0,lastError='';
   const pending=new Set();
   let saveTimer;

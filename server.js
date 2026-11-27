@@ -16,6 +16,7 @@ const PORT=Number(process.env.PORT||3088);
 const ENABLE_LEGACY=false; // Five-contract mode: no legacy scanning or paper polling.
 const FIVE_SYMBOLS=Object.freeze(['BTCUSDT','BTCUSDC','ETHUSDT','ETHUSDC','ZECUSDT']);
 const allowedSymbol=s=>FIVE_SYMBOLS.includes(s);
+const researchSymbols=[...FIVE_SYMBOLS];
 const BINANCE=(process.env.BINANCE_BASE||'https://fapi.binance.com').replace(/\/$/,'');
 const OKX=(process.env.OKX_BASE||'https://www.okx.com').replace(/\/$/,'');
 const BINANCE_WS='wss://fstream.binance.com/market/stream?streams=';
@@ -31,7 +32,7 @@ const paper=createPaperTrader({file:path.join(dataPath,reverse?'paper-reverse-or
   funding:reviewHistory.funding,quality:reviewHistory.paperQuality,durable:!!volumePath,log,trial,allMultiple,
   stoppedAt:Number(process.env.CONTRACT_LENS_PAPER_STOPPED_AT)||0,reverse});
 const MARKETS=new Map();
-const pro2=createPro2({markets:MARKETS,json,binance:BINANCE,okx:OKX,log,stopped:()=>stop,dataDir:dataPath,allowedSymbols:FIVE_SYMBOLS});
+const pro2=createPro2({markets:MARKETS,json,binance:BINANCE,okx:OKX,log,stopped:()=>stop,dataDir:dataPath,allowedSymbols:researchSymbols});
 
 /* Read-only BTCUSDT signal lab imported from the supplied component's source
  * commit. Inlined to comply with the existing deployment file allowlist. */
@@ -387,7 +388,7 @@ function createSwingFollow({initial=null,save=()=>{},now=Date.now,symbols=[],ena
   }
   if(alive){
     let changed=false;
-    for(const symbol of symbols){const v=state.items[symbol];if(v?.active){finish(v,'restart',now());changed=true}}
+    for(const symbol of Object.keys(state.items)){const v=state.items[symbol];if(v?.active){finish(v,'restart',now());changed=true}}
     if(changed)persist();
   }
   function observe(symbol,view,t=now()){
@@ -449,11 +450,11 @@ function openSwingFollow(file,symbols){
   try{return createSwingFollow({initial,save,symbols,error,onEvent:(symbol,d,at,t)=>{if(symbol==='BTCUSDT')horizonAudit.event('ssr',d,at,t)}})}catch(e){return createSwingFollow({symbols,enabled:false,error:'已有观察记录格式不兼容'})}
 }
 
-const swingFollow=openSwingFollow(path.join(dataPath,'ssr-follow-v1.json'),FIVE_SYMBOLS);
+const swingFollow=openSwingFollow(path.join(dataPath,'ssr-follow-v1.json'),researchSymbols);
 let signalLabTimer=null;
 function scanSignalLab(){
   if(stop)return;
-  try{const now=Date.now();signalLab.sweep(now);horizonAudit.sweep(now);shortStudy.scan(now);for(const symbol of FIVE_SYMBOLS){if(!MARKETS.has(symbol))continue;const view=pro2Trades.getSwing(symbol);swingFollow.observe(symbol,view,now);if(symbol==='BTCUSDT')signalLab.scan(symbol,shortStudy.snapshot(now),now)}}
+  try{const now=Date.now();signalLab.sweep(now);horizonAudit.sweep(now);shortStudy.scan(now);for(const symbol of researchSymbols){if(!MARKETS.has(symbol)||(!allowedSymbol(symbol)&&!pro2Trades.getLatestPrint(symbol)))continue;const view=pro2Trades.getSwing(symbol);swingFollow.observe(symbol,view,now);if(symbol==='BTCUSDT')signalLab.scan(symbol,shortStudy.snapshot(now),now)}}
   catch(e){log('SIGNAL_LAB_SCAN '+String(e.message||e).slice(0,120))}
 }
 
@@ -524,7 +525,8 @@ async function initBinance(){
 function connectBinanceWS(){
   if(stop||!MARKETS.size)return;
   try{
-    const streams=[...MARKETS.values()].map(m=>m.apiSymbol.toLowerCase()+'@miniTicker');
+    const streams=[...MARKETS.values()].filter(m=>allowedSymbol(m.symbol)&&m.exchange==='binance').map(m=>m.apiSymbol.toLowerCase()+'@miniTicker');
+    if(!streams.length)return;
     const ws=new WebSocket(BINANCE_WS+streams.join('/'));state.wsB=ws;
     ws.addEventListener('open',()=>{
       state.binance.ws=true;state.binance.connected=true;state.binance.error='';state.binance.at=Date.now();
@@ -582,10 +584,11 @@ async function refreshBinanceBooks(){
   if(booksPending||stop)return;
   booksPending=true;
   try{
-    await Promise.allSettled([...MARKETS.values()].map(async m=>{
-      const row=await json(BINANCE+'/fapi/v1/ticker/bookTicker?symbol='+encodeURIComponent(m.apiSymbol),10000);
-      const at=safeNumber(row.time);
-      if(row.symbol===m.symbol&&at&&Math.abs(Date.now()-at)<30000)updateBook(m,row.bidPrice,row.askPrice,at);
+    await Promise.allSettled(catalogVenues.map(async v=>{
+      const list=await json(v.base+v.api+'/ticker/bookTicker',10000);
+      if(!Array.isArray(list))return;
+      for(const row of list){const m=MARKETS.get(v.prefix+row.symbol),at=safeNumber(row.time);
+        if(m&&at&&Math.abs(Date.now()-at)<30000)updateBook(m,row.bidPrice,row.askPrice,at);}
     }));
   }finally{booksPending=false;}
 }
@@ -1504,7 +1507,8 @@ const classicFlowCache=new Map();
 let classicPulseCache=null;
 function classicLiveView(symbol,now=Date.now()){
   const market=MARKETS.get(symbol);
-  if(!market||!allowedSymbol(symbol))return null;
+  if(!market)return null;
+  pro2Trades.watch(symbol);
   let cached=classicFlowCache.get(symbol);
   if(!cached||now-cached.at>=750){
     cached={at:now,micro:pro2Trades.getMicro(symbol),largeTrades:pro2Trades.getStats(symbol)};
@@ -1591,7 +1595,7 @@ function catalogRows(venue,info,tickers,t){
   const tick=new Map(tickers.map(x=>[x.symbol,x]));
   return info.symbols.filter(x=>(x.status||x.contractStatus)==='TRADING'&&x.contractType&&x.contractType!=='NONE').map(x=>{
     const q=tick.get(x.symbol),px=Number(q?.lastPrice),chg=Number(q?.priceChangePercent),at=Number(q?.closeTime);
-    return {symbol:venue.prefix+x.symbol,displaySymbol:x.symbol,exchange:venue.key,exchangeLabel:venue.label,quoteAsset:x.quoteAsset||'',contractType:x.contractType,price:Number.isFinite(px)&&px>0?px:null,change24h:Number.isFinite(chg)?chg:null,priceAt:Number.isFinite(at)&&at>0?at:0,quoteVolume24h:venue.key==='binance'?Number(q?.quoteVolume)||0:0,ready:false,selected:false,multi:false,matches:[],direction:'neutral',quoteOnly:true,reason:'仅公开行情 · 未运行研究模型',stale:!Number.isFinite(at)||t-at>45000||at>t+1000};
+    return {symbol:venue.prefix+x.symbol,displaySymbol:x.symbol,exchange:venue.key==='binance_coin'?'coin':'binance',exchangeLabel:venue.label,contractSize:Number(x.contractSize)||0,quoteAsset:x.quoteAsset||'',contractType:x.contractType,price:Number.isFinite(px)&&px>0?px:null,change24h:Number.isFinite(chg)?chg:null,priceAt:Number.isFinite(at)&&at>0?at:0,quoteVolume24h:venue.key==='binance'?Number(q?.quoteVolume)||0:0,ready:false,selected:false,multi:false,matches:[],direction:'neutral',quoteOnly:true,reason:'仅公开行情 · 未运行研究模型',stale:!Number.isFinite(at)||t-at>45000||at>t+1000};
   });
 }
 async function refreshPublicCatalog(){
@@ -1604,12 +1608,23 @@ async function refreshPublicCatalog(){
       const rows=catalogRows(v,info,tick,now);
       if(!rows.length)throw Error('empty trading catalog');
       publicCatalog.set(v.key,{info,infoAt:info===prev?.info?prev.infoAt:now,rows,at:now,error:false});
+      const active=new Set(rows.map(x=>x.symbol));
+      for(const x of rows){
+        let m=MARKETS.get(x.symbol);
+        if(!m){m=newMarket(x.symbol,x.price||0,x.quoteVolume24h);m.priceAt=0;MARKETS.set(x.symbol,m)}
+        m.exchange=x.exchange;m.exchangeLabel=x.exchangeLabel;m.apiSymbol=x.displaySymbol;m.displaySymbol=x.displaySymbol;m.quoteAsset=x.quoteAsset;m.contractType=x.contractType;m.contractSize=x.contractSize;
+        if(x.price>0&&x.priceAt>=(m.priceAt||0)){m.price=x.price;m.priceAt=x.priceAt}
+        if(Number.isFinite(x.change24h))m.change24h=x.change24h;
+        m.quoteVolume24h=x.quoteVolume24h||m.quoteVolume24h||0;
+        if(!researchSymbols.includes(x.symbol))researchSymbols.push(x.symbol);
+      }
+      for(const [key,m] of MARKETS){if(m.exchange===(v.key==='binance_coin'?'coin':'binance')&&!allowedSymbol(key)&&!active.has(key)){MARKETS.delete(key);const i=researchSymbols.indexOf(key);if(i>=0)researchSymbols.splice(i,1)}}
     }catch{publicCatalog.set(v.key,{...prev,error:true});}
   }));}finally{catalogBusy=false}
 }
 function fullMarketSnapshot(core,now=Date.now()){
   const rows=new Map(core.symbols.map(x=>[x.symbol,x]));
-  for(const v of catalogVenues){const cache=publicCatalog.get(v.key);for(const x of cache?.rows||[]){if(!rows.has(x.symbol))rows.set(x.symbol,{...x,stale:!!x.stale||now-x.priceAt>45000||now-x.at>45000});}}
+  for(const v of catalogVenues){const cache=publicCatalog.get(v.key);for(const x of cache?.rows||[]){if(!rows.has(x.symbol))rows.set(x.symbol,{...x,stale:!!x.stale||now-x.priceAt>45000||now-(cache?.at||0)>45000});}}
   return {...core,symbols:[...rows.values()],catalog:{count:rows.size,researchCount:core.counts.eligible,venues:catalogVenues.map(v=>({label:v.label,count:publicCatalog.get(v.key)?.rows?.length||0,at:publicCatalog.get(v.key)?.at||0,error:!!publicCatalog.get(v.key)?.error}))}};
 }
 
@@ -1639,7 +1654,7 @@ const server=http.createServer((req,res)=>{
   }
   if(url.pathname==='/api/pro2/quote'){
     const symbol=(url.searchParams.get('symbol')||'').toUpperCase(),m=MARKETS.get(symbol);
-    if(!allowedSymbol(symbol)||!m)return reply(res,404,{error:'合约不可用'});
+    if(!m)return reply(res,404,{error:'合约不可用'});
     return reply(res,200,publicQuoteView(symbol,m,pro2Trades.getLatestPrint(symbol)));
   }
   if(url.pathname==='/api/pro2/swing'){
@@ -1695,7 +1710,7 @@ async function recoverQuotes(){
   if(stop||proQuotesBusy||MARKETS.size===0)return;
   proQuotesBusy=true;
   try{
-    const data=(await Promise.allSettled([...MARKETS.keys()].map(symbol=>json(BINANCE+'/fapi/v1/ticker/24hr?symbol='+encodeURIComponent(symbol),12000)))).filter(x=>x.status==='fulfilled').map(x=>x.value);
+    const data=(await Promise.allSettled(FIVE_SYMBOLS.filter(symbol=>MARKETS.has(symbol)).map(symbol=>json(BINANCE+'/fapi/v1/ticker/24hr?symbol='+encodeURIComponent(symbol),12000)))).filter(x=>x.status==='fulfilled').map(x=>x.value);
     if(!data.length)throw Error('No selected ticker response');
     const now=Date.now();let n=0;
     if(!Array.isArray(data))throw Error('Invalid ticker list');

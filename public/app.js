@@ -34,7 +34,7 @@
     $('updated').textContent=tm(s.serverTime);$('live').classList.toggle('good',c.eligible>0);
     $('live').innerHTML='<i></i>'+(c.eligible?'行情接口在线':'等待行情目录');
     $('notice').classList.toggle('warning',c.ready===0);
-    $('noticeText').textContent='全部行情 '+(s.catalog?.count??c.eligible)+' 个 · 研究合约 '+c.ready+'/'+c.eligible+' 个已就绪。新增合约仅显示公开报价。'+(s.catalog?.venues||[]).filter(v=>v.error||!v.at||s.serverTime-v.at>45000).map(v=>' '+v.label+'目录待更新。').join('');
+    $('noticeText').textContent='全部行情 '+(s.catalog?.count??c.eligible)+' 个 · 研究合约 '+c.ready+'/'+c.eligible+' 个已就绪。全部合约逐批加载2H研究；成交流按需订阅。'+(s.catalog?.venues||[]).filter(v=>v.error||!v.at||s.serverTime-v.at>45000).map(v=>' '+v.label+'目录待更新。').join('');
     const v=s.verification||{};
     $('alignment').textContent=v.samples>=30?`${n(100*v.aligned/v.samples,1)}%`:'样本不足';
     $('sampleCount').textContent=v.samples||0;$('pendingCount').textContent=v.pending||0;
@@ -384,7 +384,7 @@
   $('more').addEventListener('click',()=>{store.max+=100;renderMarkets()});
   $('markets').addEventListener('click',e=>{const pin=e.target.closest('[data-pin]');if(pin){e.stopPropagation();togglePin(pin.dataset.pin);return}
     const fav=e.target.closest('[data-fav]');if(fav){e.stopPropagation();toggleFavorite(fav.dataset.fav);return}
-    const item=e.target.closest('[data-row]');if(!item)return;const market=store.snap?.symbols?.find(x=>x.symbol===item.dataset.row);if(market?.quoteOnly){toast(''+market.displaySymbol+' · 仅公开行情，未启用详细研究');return}store.symbol=item.dataset.row;store.lastDetail=0;renderMarkets();openClassicModal();void refreshDetail();
+    const item=e.target.closest('[data-row]');if(!item)return;const market=store.snap?.symbols?.find(x=>x.symbol===item.dataset.row);if(market?.quoteOnly){toast('合约详情正在接入，请稍后重试');return}store.symbol=item.dataset.row;store.lastDetail=0;renderMarkets();openClassicModal();void refreshDetail();
     if(window.innerWidth<1050)$('detailSection').scrollIntoView({block:'start',behavior:'smooth'});
   });
   $('markets').addEventListener('keydown',e=>{if(e.target.closest('button'))return;if(e.key==='Enter'||e.key===' '){e.preventDefault();e.target.closest('[data-row]')?.click()}});

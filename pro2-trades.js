@@ -9,13 +9,13 @@ const floorHour=t=>Math.floor(t/HOUR)*HOUR;
 const safe=(v,n=0)=>Number.isFinite(+v)?+v:n;
 function createPro2Trades({markets,log=()=>{},stopped=()=>false,onTrade=()=>{}}){
   const records=new Map(), observer=createObserver({markets}),lastSeen=new Map(),leases=new Map(),latestPrint=new Map();
-  const errors={binance:'',okx:''}, reconnects={binance:0,okx:0};
-  const connections={binanceBase:null,okxBase:null,binanceWatch:null,okxWatch:null};
+  const errors={binance:'',okx:'',coin:''}, reconnects={binance:0,okx:0,coin:0};
+  const connections={binanceBase:null,okxBase:null,binanceWatch:null,okxWatch:null,coinBase:null,coinWatch:null};
   let timer=null;
-  const limit={binance:18,okx:10},activeWatchLimit=5;
-  function eligible(m){return !!(m&&m.apiSymbol&&((m.exchange==='binance'&&/(?:USDT|USDC)$/.test(m.apiSymbol))||(m.exchange==='okx'&&m.contractType==='SWAP'&&m.apiSymbol.endsWith('-USDT-SWAP')&&m.tradeUnitBase>0)))}
+  const limit={binance:5,okx:10,coin:0},activeWatchLimit=5;
+  function eligible(m){return !!(m&&m.apiSymbol&&((m.exchange==='binance')||(m.exchange==='coin'&&m.contractSize>0)||(m.exchange==='okx'&&m.contractType==='SWAP'&&m.apiSymbol.endsWith('-USDT-SWAP')&&m.tradeUnitBase>0)))}
   function top(exchange){return [...markets.values()].filter(m=>eligible(m)&&m.exchange===exchange)
-    .sort((a,b)=>safe(b.quoteVolume24h)-safe(a.quoteVolume24h)).slice(0,limit[exchange]);}
+    .sort((a,b)=>Number(['BTCUSDT','BTCUSDC','ETHUSDT','ETHUSDC','ZECUSDT'].includes(b.symbol))-Number(['BTCUSDT','BTCUSDC','ETHUSDT','ETHUSDC','ZECUSDT'].includes(a.symbol))||safe(b.quoteVolume24h)-safe(a.quoteVolume24h)).slice(0,limit[exchange]);}
   function selectedForWatch(exchange){
     const time=Date.now();for(const [sym,at] of leases){if(time-at>WATCH_TTL)leases.delete(sym)}
     const base=new Set((connections[exchange+'Base']?.selected||top(exchange)).map(m=>m.symbol));
@@ -50,7 +50,7 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false,onTrade=()=>{}})
     const slot=exchange+(kind==='Base'?'Base':'Watch');
     if(!selected.length||stopped())return;
     const by=new Map(selected.map(m=>[m.apiSymbol,m]));
-    const base=exchange==='binance'?BINANCE_MARKET_WS+selected.map(m=>m.apiSymbol.toLowerCase()+'@aggTrade').join('/') : OKX_PUBLIC_WS;
+    const base=exchange==='binance'?BINANCE_MARKET_WS+selected.map(m=>m.apiSymbol.toLowerCase()+'@aggTrade').join('/') : exchange==='coin'?'wss://dstream.binance.com/stream?streams='+selected.map(m=>m.apiSymbol.toLowerCase()+'@aggTrade').join('/'):OKX_PUBLIC_WS;
     let ws;
     try{ws=new WebSocket(base)}catch(err){errors[exchange]=String(err.message||err);reconnects[exchange]=Date.now()+10000;log(`PRO5_${exchange}_OPEN_FAIL ${errors[exchange]}`);return}
     const ctx={slot,exchange,kind,ws,selected,symbols:new Set(selected.map(m=>m.symbol)),startedAt:Date.now(),openedAt:0,lastPacketAt:0,lastTradeAt:0,received:0,discarded:0,confirmed:new Set(),closed:false,reason:'连接中'};
@@ -69,12 +69,12 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false,onTrade=()=>{}})
         const raw=typeof event.data==='string'?event.data:String(event.data);
         if(raw==='pong'||raw==='ping')return;
         const msg=JSON.parse(raw);
-        if(exchange==='binance'){
+        if(exchange==='binance'||exchange==='coin'){
           if(msg.error||msg.code){errors[exchange]=String(msg.msg||msg.error||'订阅返回错误').slice(0,160);log(`PRO5_BINANCE_MESSAGE_ERROR ${errors[exchange]}`);return}
           const t=msg.data||msg;
           if(t?.e!=='aggTrade')return;
           const m=by.get(t.s);if(!m){ctx.discarded++;return}
-          const at=+t.T,amount=(+t.p)*(+t.q);
+          const at=+t.T,amount=exchange==='coin'?(+t.q)*m.contractSize:(+t.p)*(+t.q);
           if(observe(m.symbol,t.m?'sell':'buy',amount,at,+t.p)){ctx.received++;ctx.lastTradeAt=Date.now();ctx.confirmed.add(m.symbol)}else ctx.discarded++;
         }else{
           if(msg.event==='error'){errors[exchange]=String(msg.msg||'订阅失败').slice(0,160);log(`PRO5_OKX_SUB_ERROR ${errors[exchange]}`);return}
@@ -120,7 +120,7 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false,onTrade=()=>{}})
   function tick(){
     if(stopped())return;
     const time=Date.now();
-    for(const ex of ['binance','okx']){
+    for(const ex of ['binance','okx','coin']){
       const key=ex+'Base',ctx=connections[key];
       if(ctx&&connected(ctx)){
         // BTC/ETH should deliver quickly; an open but silent obsolete route is not healthy.
