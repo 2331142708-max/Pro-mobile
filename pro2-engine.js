@@ -1,10 +1,10 @@
 'use strict';
-// Separate, verified 2-hour signal pipeline. The legacy 15/30-minute models are NOT used here.
+// Separate, verified 1-hour signal pipeline. The legacy 15/30-minute models are NOT used here.
 const {matchPatterns}=require('./patterns');
 const fs=require('node:fs');
 const path=require('node:path');
-const STEP=2*60*60*1000;
-const VERSION='pro-mobile-2h-real-candles-v1';
+const STEP=60*60*1000;
+const VERSION='pro-mobile-1h-real-candles-v1';
 const HISTORY=64;
 const MAX_ALERTS=600;
 function normBinance(b,now){
@@ -30,13 +30,13 @@ function analyzeBars(rows,now){
   const last=rows.at(-1);
   const contiguous=contiguousTail(rows);
   if(!last||last.t!==expected||contiguous.length<20){
-    return {ready:false,reason:!last?'尚未加载真实2小时K线':last.t!==expected?'等待最新2小时K线收盘数据':'连续历史K线不足20根',matches:[],bars:contiguous};
+    return {ready:false,reason:!last?'尚未加载真实1小时K线':last.t!==expected?'等待最新1小时K线收盘数据':'连续历史K线不足20根',matches:[],bars:contiguous};
   }
   const levels={};
   const found=matchPatterns(contiguous,levels);
   const matches=[];
   for(const direction of ['up','down']){
-    if(found[direction]?.length)matches.push({period:120,direction,names:found[direction],levels:Object.values(levels[direction]||{}),closedAt:last.t+STEP,close:last.c});
+    if(found[direction]?.length)matches.push({period:60,direction,names:found[direction],levels:Object.values(levels[direction]||{}),closedAt:last.t+STEP,close:last.c});
   }
   const p=contiguous.slice(-21,-1),volBase=p.reduce((sum,b)=>sum+b.v,0)/p.length;
   const volumeRatio=volBase>0?last.v/volBase:null;
@@ -44,11 +44,11 @@ function analyzeBars(rows,now){
   const atr=absRanges.reduce((sum,x)=>sum+x,0)/absRanges.length;
   const prev=contiguous.slice(-21,-1);
   const high=Math.max(...prev.map(b=>b.h)),low=Math.min(...prev.map(b=>b.l));
-  return {ready:true,reason:'已收盘2小时K线',matches,bars:contiguous,volumeRatio,atr,rangeHigh:high,rangeLow:low,closedAt:last.t+STEP};
+  return {ready:true,reason:'已收盘1小时K线',matches,bars:contiguous,volumeRatio,atr,rangeHigh:high,rangeLow:low,closedAt:last.t+STEP};
 }
 function createPro2({markets,json,binance,okx,log,stopped,dataDir,allowedSymbols=null}){
-  const file=path.join(dataDir,allowedSymbols?'pro2-alerts-five.json':'pro2-alerts.json');
-  const source=allowedSymbols&&!fs.existsSync(file)?path.join(dataDir,'pro2-alerts.json'):file;
+  const file=path.join(dataDir,'pro2-alerts-1h.json');
+  const source=file;
   let alerts=[];
   try{const found=JSON.parse(fs.readFileSync(source,'utf8'));if(Array.isArray(found))alerts=found.filter(x=>x&&x.version===VERSION).slice(-MAX_ALERTS)}catch{}
   let timer=null,checking=false,sequence=0,lastFetch=0,failCount=0,lastError='';
@@ -71,7 +71,7 @@ function createPro2({markets,json,binance,okx,log,stopped,dataDir,allowedSymbols
         if(alerts.length>MAX_ALERTS)alerts=alerts.slice(-MAX_ALERTS);
         scheduleSave();
       }
-      // Evaluate only using a later, fully closed two-hour candle; never a live quote.
+      // Evaluate only using a later, fully closed one-hour candle; never a live quote.
       let changed=false;
       for(const a of alerts){
         if(a.symbol!==m.symbol||a.result!==null)continue;
@@ -86,15 +86,15 @@ function createPro2({markets,json,binance,okx,log,stopped,dataDir,allowedSymbols
   async function refresh(m){
     const now=Date.now();pending.add(m.symbol);m.pro2Attempt=now;
     const symbol=encodeURIComponent(m.apiSymbol);
-    const url=m.exchange==='okx' ? okx+'/api/v5/market/candles?instId='+symbol+'&bar=2H&limit=70'
-      : (m.exchange==='coin'?'https://dapi.binance.com/dapi/v1/klines':binance+'/fapi/v1/klines')+'?symbol='+symbol+'&interval=2h&limit=70';
+    const url=m.exchange==='okx' ? okx+'/api/v5/market/candles?instId='+symbol+'&bar=1H&limit=70'
+      : (m.exchange==='coin'?'https://dapi.binance.com/dapi/v1/klines':binance+'/fapi/v1/klines')+'?symbol='+symbol+'&interval=1h&limit=70';
     try{
       const result=await json(url,14000),raw=m.exchange==='okx'?result.data:result;
-      if(!Array.isArray(raw)||!raw.length)throw new Error('交易所未返回2小时K线');
+      if(!Array.isArray(raw)||!raw.length)throw new Error('交易所未返回1小时K线');
       update(m,raw,Date.now());failCount=0;
     }catch(e){
       failCount++;lastError=String(e.message||e).slice(0,120);
-      m.pro2={...(m.pro2||{}),ready:false,reason:'2小时行情暂不可用',matches:[],error:lastError,lastAttempt:now};
+      m.pro2={...(m.pro2||{}),ready:false,reason:'1小时行情暂不可用',matches:[],error:lastError,lastAttempt:now};
       if(failCount%50===1)log('PRO2 K线请求失败 '+m.symbol+' '+lastError);
     }finally{pending.delete(m.symbol)}
   }
@@ -143,7 +143,7 @@ function createPro2({markets,json,binance,okx,log,stopped,dataDir,allowedSymbols
     const selected=!!(multi&&priceRecent&&bookRecent&&spreadPct<=0.12&&volRatio>=1.05&&!extended);
     return {symbol:m.symbol,displaySymbol:m.displaySymbol,exchange:m.exchange,exchangeLabel:m.exchangeLabel,
       quoteAsset:m.quoteAsset,contractType:m.contractType,price:m.price,priceAt:m.priceAt,change24h:m.change24h,
-      quoteVolume24h:m.quoteVolume24h,ready,reason:ready?p.reason:p.reason||'等待加载真实2小时K线',
+      quoteVolume24h:m.quoteVolume24h,ready,reason:ready?p.reason:p.reason||'等待加载真实1小时K线',
       closedAt:ready?p.closedAt:null,volumeRatio:ready?volRatio:null,spreadPct,selected,multi,matches,
       direction,stale:!priceRecent,trade:trades?.getStats(m.symbol)||null,error:p.error||null};
   }
@@ -151,19 +151,19 @@ function createPro2({markets,json,binance,okx,log,stopped,dataDir,allowedSymbols
     const now=Date.now(),all=[...markets.values()].map(m=>view(m,now,trades));
     const ready=all.filter(m=>m.ready).length;
     const evaluated=alerts.filter(x=>x.result);
-    return {version:VERSION,serverTime:now,intervalMinutes:120,source:'交易所已收盘2小时K线',
+    return {version:VERSION,serverTime:now,intervalMinutes:60,source:'交易所已收盘1小时K线',
       counts:{eligible:all.length,ready,loaded:all.filter(m=>m.ready||markets.get(m.symbol).pro2?.rows?.length).length,
         up:all.filter(m=>m.matches.some(h=>h.direction==='up')).length,
         down:all.filter(m=>m.matches.some(h=>h.direction==='down')).length,
         multiple:all.filter(m=>m.multi).length,selected:all.filter(m=>m.selected).length},
       symbols:all,marketPulse:trades?.getMarketPulse?.()||{ready:false,reason:'实时成交监测未就绪'},alerts:alerts.slice(-50).reverse(),
       verification:{samples:evaluated.length,aligned:evaluated.filter(x=>x.result.aligned).length,
-        pending:alerts.length-evaluated.length,description:'下一根已收盘2小时K线与形态方向一致的记录比例；不等于真实交易胜率'},
+        pending:alerts.length-evaluated.length,description:'下一根已收盘1小时K线与形态方向一致的记录比例；不等于真实交易胜率'},
       scanner:{pending:pending.size,lastError}};
   }
   function detail(symbol,trades){
     const m=markets.get(symbol);if(!m)return null;
-    return {...view(m,Date.now(),trades),charts:{120:(m.pro2?.rows||[]).slice(-64)},rangeHigh:m.pro2?.rangeHigh,
+    return {...view(m,Date.now(),trades),charts:{60:(m.pro2?.rows||[]).slice(-64)},rangeHigh:m.pro2?.rangeHigh,
       rangeLow:m.pro2?.rangeLow,atr:m.pro2?.atr,largeTrades:trades?.getStats(symbol)||null,
       micro:trades?.getMicro?.(symbol)||{covered:false,reason:'短时成交数据不可用'}};
   }

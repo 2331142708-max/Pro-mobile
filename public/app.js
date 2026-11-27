@@ -30,11 +30,11 @@
     $('totalCount').textContent=(s.catalog?.count??c.eligible).toLocaleString();$('upCount').textContent=c.up;$('downCount').textContent=c.down;$('multiCount').textContent=c.multiple;
     $('readyHero').textContent=c.ready.toLocaleString();$('totalHero').textContent=c.eligible.toLocaleString();
     $('scanProgress').style.width=(c.eligible?Math.min(100,c.ready/c.eligible*100):0)+'%';
-    $('scanHint').textContent=`已获取 ${c.loaded} 份 2H 历史 · 通过收盘完整性检查 ${c.ready} 份`;
+    $('scanHint').textContent=`已获取 ${c.loaded} 份 1H 历史 · 通过收盘完整性检查 ${c.ready} 份`;
     $('updated').textContent=tm(s.serverTime);$('live').classList.toggle('good',c.eligible>0);
     $('live').innerHTML='<i></i>'+(c.eligible?'行情接口在线':'等待行情目录');
     $('notice').classList.toggle('warning',c.ready===0);
-    $('noticeText').textContent='全部行情 '+(s.catalog?.count??c.eligible)+' 个 · 研究合约 '+c.ready+'/'+c.eligible+' 个已就绪。全部合约逐批加载2H研究；成交流按需订阅。'+(s.catalog?.venues||[]).filter(v=>v.error||!v.at||s.serverTime-v.at>45000).map(v=>' '+v.label+'目录待更新。').join('');
+    $('noticeText').textContent='全部行情 '+(s.catalog?.count??c.eligible)+' 个 · 研究合约 '+c.ready+'/'+c.eligible+' 个已就绪。全部合约逐批加载1H研究；成交流按需订阅。'+(s.catalog?.venues||[]).filter(v=>v.error||!v.at||s.serverTime-v.at>45000).map(v=>' '+v.label+'目录待更新。').join('');
     const v=s.verification||{};
     $('alignment').textContent=v.samples>=30?`${n(100*v.aligned/v.samples,1)}%`:'样本不足';
     $('sampleCount').textContent=v.samples||0;$('pendingCount').textContent=v.pending||0;
@@ -58,7 +58,7 @@
   function marketChangeText(m){return m.stale?(m.checked?'最近报价已核验 · 暂无新行情':'报价待更新'):m.change24h==null?'—':(m.change24h>=0?'+':'')+n(m.change24h)+'%'}
   function row(m){const pinned=store.pins.has(m.symbol),faved=store.favorites.has(m.symbol),name=m.displaySymbol||m.symbol;
     const tags=m.matches?.flatMap(h=>h.names.slice(0,3).map(x=>`<span class="tag ${cls(h.direction)}">${esc(x)}</span>`))||[];
-    const signal=tags.length?tags.slice(0,4).join(''):'<span class="tag">'+(m.quoteOnly?'公开行情':m.ready?'未命中形态':'待2H数据')+'</span>';
+    const signal=tags.length?tags.slice(0,4).join(''):'<span class="tag">'+(m.quoteOnly?'公开行情':m.ready?'未命中形态':'待1H数据')+'</span>';
     const meta=store.favoriteMeta[m.symbol],diff=meta?.price>0&&m.price>0?`收藏价 ${price(meta.price)} · 变化 ${n((m.price/meta.price-1)*100,2)}%`:'';
     const trade=m.trade;
     const coverage=trade?.covered?`100万${esc(m.quoteAsset||'USDT')}聚合成交 买 ${amount(trade.buy)} / 卖 ${amount(trade.sell)}`:'大额成交：未监测';
@@ -68,7 +68,7 @@
         <button class="mini-btn ${pinned?'active':''}" data-pin="${esc(m.symbol)}" aria-label="${pinned?'取消蓝色置顶':'蓝色置顶'}" title="${pinned?'取消置顶':'置顶'}">${pinned?'◆':'◇'}</button>
         ${m.selected?'<span class="tag blue">精选</span>':''}
       </div><div class="row-meta"><span class="venue">${esc(m.exchangeLabel)}</span>${signal}</div>
-      <div class="market-sub">${m.ready?'2H收盘 '+tm(m.closedAt):esc(m.reason||'待真实K线')}${diff?' · '+esc(diff):''}</div>
+      <div class="market-sub">${m.ready?'1H收盘 '+tm(m.closedAt):esc(m.reason||'待真实K线')}${diff?' · '+esc(diff):''}</div>
       <div class="market-sub">${esc(coverage)}</div></div>
       <div class="market-side"><div class="market-price">${price(m.price)}</div><div class="market-change ${m.stale?'':m.change24h>=0?'positive':'negative'}">${marketChangeText(m)}</div><div class="market-dir ${cls(m.direction)}">${m.quoteOnly?'仅行情':direction(m.direction)}</div></div>
     </article>`;
@@ -80,10 +80,10 @@
       `<div class="empty">${store.filter==='pinned'?'没有置顶合约，点击任一合约旁的◇即可置顶。':store.filter==='favorite'?'自选为空，请在全部合约旁点击☆。':store.filter==='selected'?'暂时没有符合多形态、盘口与成交量条件的精选合约。':store.filter==='all'&&!store.snap?.symbols?.length?'正在加载真实合约目录…':'没有符合筛选条件的合约；这不表示一定不会涨跌。'}</div>`;
   }
   function renderAlerts(){const alerts=store.snap?.alerts||[];
-    $('alerts').innerHTML=alerts.length?alerts.slice(0,15).map(a=>`<div class="alert-item"><span class="tag ${cls(a.direction)}">${direction(a.direction)}</span><strong>${esc(a.displaySymbol||a.symbol)}</strong><span>${(a.names||[]).map(esc).join('、')}</span><small>2H 收盘 ${tm(a.closedAt)} · 观测 ${tm(a.observedAt)} · ${a.result?('下一根2H变动 '+n(a.result.change,2)+'%'):'下一根2H结果待检查'}</small></div>`).join(''):
-      '<div class="empty">目前没有真实已收盘2H形态记录，等待数据积累。</div>';
+    $('alerts').innerHTML=alerts.length?alerts.slice(0,15).map(a=>`<div class="alert-item"><span class="tag ${cls(a.direction)}">${direction(a.direction)}</span><strong>${esc(a.displaySymbol||a.symbol)}</strong><span>${(a.names||[]).map(esc).join('、')}</span><small>1H 收盘 ${tm(a.closedAt)} · 观测 ${tm(a.observedAt)} · ${a.result?('下一根1H变动 '+n(a.result.change,2)+'%'):'下一根1H结果待检查'}</small></div>`).join(''):
+      '<div class="empty">目前没有真实已收盘1H形态记录，等待数据积累。</div>';
   }
-  function chartSvg(bars){if(!bars?.length)return '<div class="empty">2小时K线数据尚未加载。</div>';
+  function chartSvg(bars){if(!bars?.length)return '<div class="empty">1小时K线数据尚未加载。</div>';
     const a=bars.slice(-44),W=620,H=220,padX=17,padY=15;
     const low=Math.min(...a.map(x=>x.l)),high=Math.max(...a.map(x=>x.h)),d=Math.max(high-low,high*.00005);
     const y=p=>padY+(high-p)/d*(H-2*padY),dx=(W-2*padX)/a.length;
@@ -92,7 +92,7 @@
       const top=Math.min(y(b.o),y(b.c)),height=Math.max(1,Math.abs(y(b.o)-y(b.c)));
       shapes+=`<rect class="${c}" x="${(x-dx*.32).toFixed(2)}" y="${top.toFixed(2)}" width="${(dx*.64).toFixed(2)}" height="${height.toFixed(2)}" rx=".3"/>`;
     }
-    return `<svg class="candles" viewBox="0 0 ${W} ${H}" role="img" aria-label="最近${a.length}根真实已收盘2小时K线">${[.25,.5,.75].map(f=>`<line class="chart-grid" x1="0" x2="${W}" y1="${H*f}" y2="${H*f}"/>`).join('')}${shapes}<text class="chart-axis" x="${W-83}" y="13">高 ${price(high)}</text><text class="chart-axis" x="${W-83}" y="${H-5}">低 ${price(low)}</text></svg>`;
+    return `<svg class="candles" viewBox="0 0 ${W} ${H}" role="img" aria-label="最近${a.length}根真实已收盘1小时K线">${[.25,.5,.75].map(f=>`<line class="chart-grid" x1="0" x2="${W}" y1="${H*f}" y2="${H*f}"/>`).join('')}${shapes}<text class="chart-axis" x="${W-83}" y="13">高 ${price(high)}</text><text class="chart-axis" x="${W-83}" y="${H-5}">低 ${price(low)}</text></svg>`;
   }
   function tradeInfo(t){if(!t||!t.covered)return `<div class="disclaimer">该合约未纳入百万计价币种单位 聚合成交监测。这里不推算买卖额，也不识别账户身份。</div>`;
     return `<div class="trade-box"><div class="detail-desc">100万计价币种单位 以上聚合成交 · 本小时累计（监测接入后，非全天、非全部交易）</div><div class="trade-pair"><div><strong style="color:#168568">${amount(t.buy)} ${esc(t.quoteAsset||'USDT')}</strong><small>主动买 · ${t.buyCount} 条</small></div><div><strong style="color:#dc5860">${amount(t.sell)} ${esc(t.quoteAsset||'USDT')}</strong><small>主动卖 · ${t.sellCount} 条</small></div></div><div class="detail-desc">整点清零 · 监测起始 ${tm(t.firstObservedAt)} · 不是特定大户的账户交易额</div></div>`;
@@ -126,7 +126,7 @@
   function verificationBlock(d){
     const signals=(store.snap?.alerts||[]).filter(a=>a.symbol===d.symbol),done=signals.filter(a=>a.result&&typeof a.result.aligned==='boolean');
     const aligned=done.filter(a=>a.result.aligned).length;
-    return `<div class="aux-card"><div class="aux-card-title"><strong>历史信号验证</strong><span>仅已收盘 2H</span></div><div class="aux-hero-value">${done.length>=20?pctText(aligned/done.length*100):'样本不足'}</div><div class="minor">该合约最近已保存记录：${aligned} / ${done.length} 次下一根 2H 方向一致 · ${signals.filter(a=>!a.result).length} 条待验证</div><div class="minor">这是方向一致率，不是扣除手续费、滑点后的净收益或交易成功率。旧版 20 分钟模拟未与 2H 主信号混用。</div></div>`;
+    return `<div class="aux-card"><div class="aux-card-title"><strong>历史信号验证</strong><span>仅已收盘 1H</span></div><div class="aux-hero-value">${done.length>=20?pctText(aligned/done.length*100):'样本不足'}</div><div class="minor">该合约最近已保存记录：${aligned} / ${done.length} 次下一根 1H 方向一致 · ${signals.filter(a=>!a.result).length} 条待验证</div><div class="minor">这是方向一致率，不是扣除手续费、滑点后的净收益或交易成功率。旧版 20 分钟模拟未与 1H 主信号混用。</div></div>`;
   }
   function shortBlock(m){
     if(!m?.covered||!m.ready)return `<div class="aux-empty">${esc(m?.reason||'监测尚未接入')}。短时信息只对公开成交监测覆盖的合约开放。</div>`;
@@ -285,14 +285,14 @@
     const savedDiff=sampled&&savedPrice?fmtDiff(sampled.difference):'数据不足/行情延迟';
     const sentiment=readyPulse?esc(p.sentiment):'多空分歧 · 样本不足';
     const longStrength=readyPulse?p.longScore:null,shortStrength=readyPulse?p.shortScore:null;
-    const twoHours=d.ready?'真实已收盘2H确认':'等待2H收盘确认';
+    const oneHour=d.ready?'真实已收盘1H确认':'等待1H收盘确认';
     $('classicTitle').textContent=`${d.displaySymbol||d.symbol} · 原版详情`;
     body.innerHTML=`<div class="classic-content-inner">
       <div class="classic-kicker">MARKET SCANNER <span>● 自动观察 · ${classicStamp(live?.serverTime||d.priceAt)}</span></div>
-      <div class="classic-headline"><strong>${esc(d.displaySymbol||d.symbol)}</strong><span>${esc(d.exchangeLabel)} · ${esc(twoHours)}</span></div>
+      <div class="classic-headline"><strong>${esc(d.displaySymbol||d.symbol)}</strong><span>${esc(d.exchangeLabel)} · ${esc(oneHour)}</span></div>
       <div class="classic-live-quote"><strong id="classicLivePrice">—</strong><div id="classicQuoteAge">等待最新公开报价</div></div>
-      <div class="classic-sample"><strong>${done.length>=20?pctText(100*correct/done.length):'样本不足'}</strong><div>2小时下一根方向一致 ${correct} / ${done.length} 笔<br>净收益率：未计算（不是交易胜率）</div></div>
-      <div class="classic-desc">取各信号首次可见的新鲜报价模拟观察。每10分钟一档，30分钟后按真实报价复核；不使用未收盘2小时K线做主信号。</div>
+      <div class="classic-sample"><strong>${done.length>=20?pctText(100*correct/done.length):'样本不足'}</strong><div>1小时下一根方向一致 ${correct} / ${done.length} 笔<br>净收益率：未计算（不是交易胜率）</div></div>
+      <div class="classic-desc">取各信号首次可见的新鲜报价模拟观察。每10分钟一档，30分钟后按真实报价复核；不使用未收盘1小时K线做主信号。</div>
       <div class="classic-saved">
         <div>收藏时间 <b>${saved?tm(savedMeta.at):'未收藏'}</b></div>
         <div>收藏信号 <b>${saved?esc(statusLabel):'观望/未确认'} · 强度 ${saved?esc((savedMeta.names||[]).join('、')||'—'):'—'}</b></div>
@@ -305,7 +305,7 @@
         <div class="classic-future-value ${cls(m?.short?.direction)}">${future}</div>
         <div class="classic-future-score">信号一致性 ${rawScore==null?'—':rawScore}/100</div>
         <div class="classic-future-text">${!m?.ready?esc(m?.reason||'该合约缺少连续公开成交数据'):esc(m?.short?.explanation||'多项条件未同向确认')}</div>
-        <div class="classic-future-foot">公开成交持续接收，2H K线按收盘更新。80分为规则评分，非成功率。</div>
+        <div class="classic-future-foot">公开成交持续接收，1H K线按收盘更新。80分为规则评分，非成功率。</div>
       </section>
       <section class="classic-flows" id="classicFlowArea"><div class="classic-muted" id="classicFlowAge">等待实时成交统计</div>
         <div class="classic-section-row"><strong>大户实时买卖额</strong><span>单笔 &gt; 100万计价币种单位</span></div>
@@ -321,7 +321,7 @@
         <div class="classic-line">每10分钟评估 · 30分钟方向命中 ${aligned}/${checked} 笔（积累样本中）</div>
       </section>
       ${classicLarge(m)}
-      <div class="classic-extra"><strong>2小时主信号：</strong>${d.ready?esc(direction(d.direction)):'尚未确认'} · ${d.selected?'多条件筛选通过':d.multi?'多形态待复核':'未达到精选条件'}<br>2小时成交量相对20根均量 ${d.volumeRatio==null?'—':n(d.volumeRatio,2)+'倍'} · 点差 ${d.spreadPct==null?'—':n(d.spreadPct,3)+'%'}</div>
+      <div class="classic-extra"><strong>1小时主信号：</strong>${d.ready?esc(direction(d.direction)):'尚未确认'} · ${d.selected?'多条件筛选通过':d.multi?'多形态待复核':'未达到精选条件'}<br>1小时成交量相对20根均量 ${d.volumeRatio==null?'—':n(d.volumeRatio,2)+'倍'} · 点差 ${d.spreadPct==null?'—':n(d.spreadPct,3)+'%'}</div>
       <div class="classic-warning">数据仅覆盖实际接入并持续监测的合约，不是全部成交。公开聚合成交无法判定大户身份；规则强度不是胜率。本页面不执行交易。</div>
     </div>`;
     body.scrollTop=hold;paintClassicAge();
@@ -343,25 +343,25 @@
 
   function renderDetail(){const d=store.detail;if(!d||d.symbol!==store.symbol)return;
     $('detailTitle').textContent=d.displaySymbol||d.symbol;
-    $('detailLabel').textContent=d.ready?'2H 已确认':'2H 数据待确认';
+    $('detailLabel').textContent=d.ready?'1H 已确认':'1H 数据待确认';
     const names=d.matches?.flatMap(x=>x.names.map(name=>`<span class="tag ${cls(x.direction)}">${esc(name)} · ${direction(x.direction)}</span>`))||[];
     const meta=store.favoriteMeta[d.symbol],added=meta?.at?`收藏于 ${tm(meta.at)} · 当时价格 ${price(meta.price)}`:'未收藏';
     $('detailContent').innerHTML=`<div class="detail-content">
       <div class="detail-price-line"><div><div class="detail-price">${price(d.price)}</div><div class="detail-desc">${esc(d.exchangeLabel)} · ${d.stale?'报价较旧，暂停精选判断':'报价时间 '+since(d.priceAt)}</div></div><span class="tag ${cls(d.direction)}">${direction(d.direction)}</span></div>
       <h3 class="detail-section-title">已保存信号与价格差</h3>${favoriteSnapshot(d)}
       ${verificationBlock(d)}
-      <div class="info-grid"><div class="info-cell"><span>最后 2H 收盘</span><strong>${tm(d.closedAt)}</strong></div><div class="info-cell"><span>形态确认状态</span><strong>${d.ready?'真实K线已确认':'待最新已收盘K线'}</strong></div>
+      <div class="info-grid"><div class="info-cell"><span>最后 1H 收盘</span><strong>${tm(d.closedAt)}</strong></div><div class="info-cell"><span>形态确认状态</span><strong>${d.ready?'真实K线已确认':'待最新已收盘K线'}</strong></div>
       <div class="info-cell"><span>成交量 / 20根均量</span><strong>${d.volumeRatio==null?'—':n(d.volumeRatio,2)+' 倍'}</strong></div><div class="info-cell"><span>盘口点差</span><strong>${d.spreadPct==null?'待盘口报价':n(d.spreadPct,3)+'%'}</strong></div></div>
-      <h3 class="detail-section-title">2 小时 K 线形态</h3><div class="detail-tags">${names.length?names.join(''):`<span class="tag">${esc(d.reason||'暂无形态')}</span>`}</div>
+      <h3 class="detail-section-title">1 小时 K 线形态</h3><div class="detail-tags">${names.length?names.join(''):`<span class="tag">${esc(d.reason||'暂无形态')}</span>`}</div>
       <div class="signal-card"><strong>${d.selected?'已通过精选复核':d.multi?'同向多个形态，仍待其他条件确认':'暂未通过精选条件'}</strong><p>筛选需要多形态、较新的行情和盘口、成交量与价格位置条件同时满足。形态出现不等于入场许可。</p></div>
-      <h3 class="detail-section-title">最近已收盘 2 小时 K 线</h3>${chartSvg(d.charts?.[120])}<div class="detail-desc">图表只包含已确认收盘的历史K线。未收盘数据不参加形态判断。</div>
+      <h3 class="detail-section-title">最近已收盘 1 小时 K 线</h3>${chartSvg(d.charts?.[60])}<div class="detail-desc">图表只包含已确认收盘的历史K线。未收盘数据不参加形态判断。</div>
       <h3 class="detail-section-title">未来2分钟方向 · 短时辅助观察</h3>${shortBlock(d.micro)}
       <h3 class="detail-section-title">盘中主动成交与资金活跃度</h3>${activityBlock(d.micro)}
       <h3 class="detail-section-title">10分钟五合约样本情绪（名义额合计，未换汇）</h3>${marketPulseBlock(store.snap?.marketPulse)}
       <h3 class="detail-section-title">多因子趋势条件</h3>${factorBlock(d)}
       <h3 class="detail-section-title">大户实时买卖额 · 百万计价币种单位门槛</h3>${tradeInfo(d.largeTrades)}
       <h3 class="detail-section-title">大额实时买卖 · 10万计价币种单位门槛</h3>${microLargeBlock(d.micro)}
-      <div class="detail-desc">${esc(added)} · 短时指标独立于2H主信号，数据缺失时不输出推测值。</div>
+      <div class="detail-desc">${esc(added)} · 短时指标独立于1H主信号，数据缺失时不输出推测值。</div>
       <div class="disclaimer">交易所公开数据无法证明某笔成交来自哪个“大户”，也不能准确预测下一根K线。该页面不执行买卖、不显示未经验证的胜率。</div>
     </div>`;
     renderClassicDetail();
@@ -370,13 +370,13 @@
     try{const detail=await get('/api/pro2/detail?symbol='+encodeURIComponent(symbol));if(symbol!==store.symbol)return;store.detail=detail;store.lastDetail=Date.now();renderDetail()}
     catch(e){$('detailLabel').textContent='详情读取失败';console.warn(e)}}
   async function refresh(){if(store.fetching)return;store.fetching=true;
-    try{const data=await get('/api/pro2/snapshot');if(!data||data.intervalMinutes!==120)throw Error('返回的不是2小时信号接口');
+    try{const data=await get('/api/pro2/snapshot');if(!data||data.intervalMinutes!==60)throw Error('返回的不是1小时信号接口');
       store.snap=data;store.errors=0;
       if(!data.symbols.some(x=>!x.quoteOnly&&x.symbol===store.symbol)&&data.symbols.some(x=>!x.quoteOnly)){store.symbol=data.symbols.find(x=>!x.quoteOnly&&x.symbol==='BTCUSDT')?.symbol||data.symbols.find(x=>!x.quoteOnly).symbol;store.lastDetail=0}
       renderOverview();renderMarkets();renderAlerts();
       if(Date.now()-store.lastDetail>4000)void refreshDetail();
     }catch(e){store.errors++;$('live').classList.remove('good');$('live').innerHTML='<i></i>数据待连接';
-      $('notice').classList.add('warning');$('noticeText').textContent='2小时行情接口请求失败（'+esc(e.message)+'）。将自动重试；无法确认数据时不生成信号。';
+      $('notice').classList.add('warning');$('noticeText').textContent='1小时行情接口请求失败（'+esc(e.message)+'）。将自动重试；无法确认数据时不生成信号。';
     }finally{store.fetching=false}}
   $('tabs').addEventListener('click',e=>{const btn=e.target.closest('[data-filter]');if(!btn)return;
     store.filter=btn.dataset.filter;store.max=100;document.querySelectorAll('[data-filter]').forEach(b=>b.classList.toggle('active',b===btn));renderMarkets()});
@@ -393,7 +393,7 @@
   $('classicBackdrop').addEventListener('click',e=>{if(e.target===$('classicBackdrop'))closeClassicModal()});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&store.classicOpen)closeClassicModal()});
   $('classicOpen').addEventListener('click',openClassicModal);
-  // SSR is independent of the 2H model. Only actual elapsed public trades are displayed.
+  // SSR is independent of the 1H model. Only actual elapsed public trades are displayed.
   const swingDialog=$('swingDialog');let swingTimer=null,swingBusy=false,swingGeneration=0,quoteTimer=null,quoteAgeTimer=null,quoteBusy=false,swingQuote=null,quoteReceivedMono=0,quoteRoundTrip=0;
   const swingNum=(x,d=3)=>x==null||!Number.isFinite(x)?'—':n(x,d);
   const swingPct=x=>x==null?'—':(x>0?'+':'')+swingNum(x)+'%';
