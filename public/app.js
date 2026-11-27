@@ -607,7 +607,7 @@
     }
     return {next,changed:[...changed]};
   }
-  let reviewSound=false,reviewAudio=null,reviewSeen=null,reviewLastNotice=0,reviewPulse=null,reviewToneTimers=[];
+  let reviewSound=false,reviewAudio=null,reviewSeen=null,reviewLastNotice=0,reviewPulse=null,reviewToneTimers=[],reviewPending=new Set(),reviewQueueTimer=null;
   const reviewToggle=$('swingReviewSound'),reviewNotice=$('swingReviewNotice');
   const clampReviewVolume=v=>Number.isFinite(Number(v))?Math.max(0,Math.min(400,Math.round(Number(v)))):100;
   const reviewVolumeKey='swing-review-volume-v1';
@@ -621,13 +621,33 @@
   reviewVolumePanel.innerHTML='<div style="display:flex;align-items:center;gap:8px"><label for="swingVolumeRange">音量</label><input id="swingVolumeRange" type="range" min="0" max="400" step="1" style="flex:1;min-width:0;accent-color:#64748b"><output id="swingVolumeValue" for="swingVolumeRange" style="min-width:43px;text-align:right;font-variant-numeric:tabular-nums"></output></div><div style="display:flex;justify-content:space-between;font-size:10px"><span>0 静音</span><span>100 原音量</span><span>400 最大</span></div>';
   reviewNotice.insertAdjacentElement('afterend',reviewVolumePanel);
   const reviewVolumeRange=$('swingVolumeRange'),reviewVolumeValue=$('swingVolumeValue');
+  const reviewTest=document.createElement('button');reviewTest.type='button';reviewTest.textContent='试听提示音';
+  reviewTest.style.cssText='display:block;margin:7px 0 0 auto;padding:5px 10px;border-radius:5px;font-size:12px';
+  reviewVolumePanel.appendChild(reviewTest);
+  async function prepareReviewAudio(){
+    const Audio=window.AudioContext||window.webkitAudioContext;if(!Audio)throw Error('not supported');
+    if(!reviewAudio||reviewAudio.state==='closed')reviewAudio=new Audio();
+    if(reviewAudio.state!=='running')await reviewAudio.resume();
+    if(reviewAudio.state!=='running')throw Error('audio unavailable');
+  }
+  reviewTest.addEventListener('click',async()=>{
+    try{
+      await prepareReviewAudio();
+      if(!swingDialog.open)return;
+      if(reviewVolume===0){reviewNotice.textContent='当前音量0%，请先调高';reviewNotice.hidden=false;return;}
+      const played=playReviewTone(true);
+      reviewNotice.textContent=played?'已播放试听 · 请确认手机媒体音量':'试听未能播放，请重新点击';
+      reviewNotice.hidden=false;
+      if(reviewSound&&reviewPending.size)queueReviewNotice();
+    }catch{reviewNotice.textContent='声音不可用，请检查手机媒体音量并重新试听';reviewNotice.hidden=false}
+  });
   function paintReviewVolume(){
     reviewVolumeRange.value=String(reviewVolume);reviewVolumeValue.textContent=reviewVolume+'%';reviewVolumeButton.textContent='音量 '+reviewVolume+'%';
   }
   function hideReviewVolume(){reviewVolumePanel.hidden=true;reviewVolumeButton.setAttribute('aria-expanded','false')}
   reviewVolumeButton.addEventListener('click',()=>{reviewVolumePanel.hidden=!reviewVolumePanel.hidden;reviewVolumeButton.setAttribute('aria-expanded',String(!reviewVolumePanel.hidden));});
   reviewVolumeRange.addEventListener('input',()=>{
-    reviewVolume=clampReviewVolume(reviewVolumeRange.value);paintReviewVolume();
+    reviewVolume=clampReviewVolume(reviewVolumeRange.value);paintReviewVolume();if(reviewSound&&reviewPending.size)queueReviewNotice();
     try{localStorage.setItem(accountKey(reviewVolumeKey),JSON.stringify(reviewVolume))}catch{}
   });
   paintReviewVolume();
@@ -643,35 +663,48 @@
     try{const animation=el.animate([{opacity:0},{opacity:1},{opacity:0}],{duration:1400,iterations:4,easing:'ease-in-out'});animation.onfinish=animation.oncancel=()=>{el.remove();if(reviewPulse===el)reviewPulse=null;};return true;}catch{clearReviewPulse();return false;}
   }
   function paintReviewToggle(){reviewToggle.textContent=reviewSound?'提醒开':'提醒关';reviewToggle.setAttribute('aria-pressed',String(reviewSound));}
-  function resetReviewReminder(){hideReviewVolume();clearReviewPulse();reviewSound=false;reviewSeen=null;reviewLastNotice=0;reviewNotice.hidden=true;reviewNotice.textContent='';paintReviewToggle()}
+  function clearReviewQueue(){if(reviewQueueTimer!==null)clearTimeout(reviewQueueTimer);reviewQueueTimer=null;reviewPending.clear()}
+  function resetReviewReminder(){hideReviewVolume();clearReviewQueue();clearReviewPulse();reviewSound=false;reviewSeen=null;reviewLastNotice=0;reviewNotice.hidden=true;reviewNotice.textContent='';paintReviewToggle()}
   reviewToggle.addEventListener('click',async()=>{
-    if(reviewSound){clearReviewPulse();reviewSound=false;reviewNotice.hidden=true;paintReviewToggle();return}
+    if(reviewSound){clearReviewQueue();clearReviewPulse();reviewSound=false;reviewNotice.hidden=true;paintReviewToggle();return}
     const generation=swingGeneration;
     try{
-      const Audio=window.AudioContext||window.webkitAudioContext;if(!Audio)throw Error('not supported');
-      if(!reviewAudio||reviewAudio.state==='closed')reviewAudio=new Audio();
-      if(reviewAudio.state!=='running')await reviewAudio.resume();
+      await prepareReviewAudio();
       if(!swingDialog.open||generation!==swingGeneration)return;
       if(reviewAudio.state!=='running')throw Error('audio unavailable');
-      reviewSound=true;reviewSeen=completedReviewStamp(swingFullData);reviewNotice.textContent='已开启：历史模拟价格及六模型完成结果更新提醒（每分钟合并声音）';reviewNotice.hidden=false;paintReviewToggle();
+      reviewSound=true;reviewSeen=completedReviewStamp(swingFullData);reviewLastNotice=0;reviewNotice.textContent='已开启：历史结果更新会合并排队提醒（每分钟一次）';reviewNotice.hidden=false;paintReviewToggle();
     }catch{reviewSound=false;paintReviewToggle();reviewNotice.textContent='声音不可用，请重新点击开启';reviewNotice.hidden=false}
   });
+  function queueReviewNotice(){
+    if(!reviewSound||!reviewPending.size||!swingDialog.open||document.visibilityState!=='visible')return;
+    if(reviewQueueTimer!==null)return;
+    const wait=Math.max(0,60000-(Date.now()-reviewLastNotice));
+    if(wait>0){
+      reviewNotice.textContent='历史结果待合并提醒：'+[...reviewPending].join('、')+' · 非下单提示';reviewNotice.hidden=false;
+      reviewQueueTimer=setTimeout(()=>{reviewQueueTimer=null;queueReviewNotice()},wait);return;
+    }
+    if(reviewVolume===0){reviewNotice.textContent='历史结果已更新 · 音量0%（静音）';reviewNotice.hidden=false;return;}
+    if(reviewAudio?.state!=='running'){reviewNotice.textContent='历史结果待提醒 · 音频已暂停，请点音量 → 试听恢复';reviewNotice.hidden=false;return;}
+    // Only consume queued updates after audio is successfully scheduled.
+    if(!playReviewTone()){reviewNotice.textContent='声音未能播放，请点音量 → 试听';reviewNotice.hidden=false;return;}
+    reviewLastNotice=Date.now();
+    reviewNotice.textContent='历史结果更新：'+[...reviewPending].join('、')+' · 已播放提醒 · 非下单提示';reviewNotice.hidden=false;
+    reviewPending.clear();
+    if(showReviewPulse()){
+      for(let i=1;i<4;i++)reviewToneTimers.push(setTimeout(()=>playReviewTone(),i*1400));
+    }
+  }
   function reviewCompleted(v){
     const latest=completedReviewStamp(v);
     if(latest===null)return;
     const {next,changed}=compareCompletedReviews(reviewSeen,latest);
     reviewSeen=next;
-    if(!reviewSound||!changed.length||document.visibilityState!=='visible'||!swingDialog.open)return;
-    const t=Date.now();
-    reviewNotice.textContent='历史结果更新：'+changed.join('、')+' · 非下单提示';reviewNotice.hidden=false;
-    if(t-reviewLastNotice<60000)return;
-    reviewLastNotice=t;
-    if(showReviewPulse()){
-      for(let i=0;i<4;i++)reviewToneTimers.push(setTimeout(playReviewTone,700+i*1400));
-    }else{playReviewTone();}
+    if(!reviewSound||!swingDialog.open)return;
+    for(const label of changed)reviewPending.add(label);
+    queueReviewNotice();
   }
-  function playReviewTone(){
-    if(!reviewSound||reviewVolume===0||!swingDialog.open||document.visibilityState!=='visible'||reviewAudio?.state!=='running')return;
+  function playReviewTone(preview=false){
+    if((!preview&&!reviewSound)||reviewVolume===0||!swingDialog.open||document.visibilityState!=='visible'||reviewAudio?.state!=='running')return false;
     try{
       // Original radar-style electronic chime; no Apple ringtone audio.
       const at=reviewAudio.currentTime,peak=.045*reviewVolume/100;
@@ -681,7 +714,8 @@
         g.gain.setValueAtTime(.0001,start);g.gain.exponentialRampToValueAtTime(Math.max(.00011,peak*level),start+.018);g.gain.exponentialRampToValueAtTime(.0001,start+.15);
         o.connect(g);g.connect(reviewAudio.destination);o.start(start);o.stop(start+.16);
       }
-    }catch{}
+      return true;
+    }catch{return false}
   }
 
   async function refreshSwing(){if(!swingDialog.open||swingBusy)return;const generation=swingGeneration,symbol=store.symbol;swingBusy=true;
