@@ -34,7 +34,7 @@
     $('updated').textContent=tm(s.serverTime);$('live').classList.toggle('good',c.eligible>0);
     $('live').innerHTML='<i></i>'+(c.eligible?'行情接口在线':'等待行情目录');
     $('notice').classList.toggle('warning',c.ready===0);
-    $('noticeText').textContent='全部行情 '+(s.catalog?.count??c.eligible)+' 个 · 研究合约 '+c.ready+'/'+c.eligible+' 个已就绪。全部合约逐批加载1H研究；成交流按需订阅。'+(s.catalog?.venues||[]).filter(v=>v.error||!v.at||s.serverTime-v.at>45000).map(v=>' '+v.label+'目录待更新。').join('');
+    $('noticeText').textContent='全部行情 '+(s.catalog?.count??c.eligible)+' 个 · 研究合约 '+c.ready+'/'+c.eligible+' 个已就绪。全部合约逐批加载1H研究；成交流分组持续订阅。'+(s.catalog?.venues||[]).filter(v=>v.error||!v.at||s.serverTime-v.at>45000).map(v=>' '+v.label+'目录待更新。').join('');
     const v=s.verification||{};
     $('alignment').textContent=v.samples>=30?`${n(100*v.aligned/v.samples,1)}%`:'样本不足';
     $('sampleCount').textContent=v.samples||0;$('pendingCount').textContent=v.pending||0;
@@ -56,12 +56,13 @@
     return list.sort(sort);
   }
   function marketChangeText(m){return m.stale?(m.checked?'最近报价已核验 · 暂无新行情':'报价待更新'):m.change24h==null?'—':(m.change24h>=0?'+':'')+n(m.change24h)+'%'}
+  function marketTradeText(m){const t=m.trade;return t?.ready?`100万${m.quoteAsset||'USDT'}聚合成交 买 ${amount(t.buy)} / 卖 ${amount(t.sell)}`:'大额成交：'+(t?.reason||'等待成交流');}
   function row(m){const pinned=store.pins.has(m.symbol),faved=store.favorites.has(m.symbol),name=m.displaySymbol||m.symbol;
     const tags=m.matches?.flatMap(h=>h.names.slice(0,3).map(x=>`<span class="tag ${cls(h.direction)}">${esc(x)}</span>`))||[];
     const signal=tags.length?tags.slice(0,4).join(''):'<span class="tag">'+(m.quoteOnly?'公开行情':m.ready?'未命中形态':'待1H数据')+'</span>';
     const meta=store.favoriteMeta[m.symbol],diff=meta?.price>0&&m.price>0?`收藏价 ${price(meta.price)} · 变化 ${n((m.price/meta.price-1)*100,2)}%`:'';
     const trade=m.trade;
-    const coverage=trade?.covered?`100万${esc(m.quoteAsset||'USDT')}聚合成交 买 ${amount(trade.buy)} / 卖 ${amount(trade.sell)}`:'大额成交：未监测';
+    const coverage=marketTradeText(m);
     return `<article class="market-row ${pinned?'pinned':''} ${store.symbol===m.symbol?'selected':''}" data-row="${esc(m.symbol)}" tabindex="0" role="button" aria-label="查看${esc(name)}分析">
       <div class="market-row-main"><div class="market-name-line"><strong class="sym">${esc(name)}</strong>
         <button class="mini-btn star ${faved?'active':''}" data-fav="${esc(m.symbol)}" aria-label="${faved?'取消':'加入'}自选" title="${faved?'取消':'加入'}自选">${faved?'★':'☆'}</button>
@@ -69,7 +70,7 @@
         ${m.selected?'<span class="tag blue">精选</span>':''}
       </div><div class="row-meta"><span class="venue">${esc(m.exchangeLabel)}</span>${signal}</div>
       <div class="market-sub">${m.ready?'1H收盘 '+tm(m.closedAt):esc(m.reason||'待真实K线')}${diff?' · '+esc(diff):''}</div>
-      <div class="market-sub">${esc(coverage)}</div></div>
+      <div class="market-sub" data-market-trades>${esc(coverage)}</div></div>
       <div class="market-side"><div class="market-price">${price(m.price)}</div><div class="market-change ${m.stale?'':m.change24h>=0?'positive':'negative'}">${marketChangeText(m)}</div><div class="market-dir ${cls(m.direction)}">${m.quoteOnly?'仅行情':direction(m.direction)}</div></div>
     </article>`;
   }
@@ -763,13 +764,14 @@
       for(const m of store.snap.symbols){
         const q=by.get(m.symbol);if(!q)continue;
         if(q.priceAt>=(m.priceAt||0)){m.price=q.price;m.priceAt=q.priceAt;m.change24h=q.change24h;m.stale=q.stale;}
-        m.checked=q.checked;
+        m.checked=q.checked;m.trade=q.trade;m.quoteVolume24h=q.quoteVolume24h;
       }
       const markets=new Map(store.snap.symbols.map(m=>[m.symbol,m]));
       for(const el of $('markets').querySelectorAll('[data-row]')){
         const m=markets.get(el.dataset.row);if(!m)continue;
         const p=el.querySelector('.market-price'),change=el.querySelector('.market-change');
         if(p)p.textContent=price(m.price);
+        const flow=el.querySelector('[data-market-trades]');if(flow)flow.textContent=marketTradeText(m);
         if(change){change.textContent=marketChangeText(m);change.classList.toggle('positive',!m.stale&&m.change24h>=0);change.classList.toggle('negative',!m.stale&&m.change24h<0);}
       }
     }catch{}finally{quoteListBusy=false}

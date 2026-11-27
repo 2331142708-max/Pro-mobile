@@ -1682,7 +1682,7 @@ async function refreshPublicCatalog(){
   }));}finally{catalogBusy=false}
 }
 function publicQuoteRows(now=Date.now()){
-  return [...MARKETS.values()].map(m=>({symbol:m.symbol,price:m.price,priceAt:m.priceAt,change24h:m.change24h,stale:!(m.price>0&&m.priceAt>0&&Math.abs(now-m.priceAt)<60000),checked:!!(m.quoteCheckedAt&&now-m.quoteCheckedAt<45000)}));
+  return [...MARKETS.values()].map(m=>({symbol:m.symbol,price:m.price,priceAt:m.priceAt,change24h:m.change24h,stale:!(m.price>0&&m.priceAt>0&&Math.abs(now-m.priceAt)<60000),checked:!!(m.quoteCheckedAt&&now-m.quoteCheckedAt<45000),trade:pro2Trades.getStats(m.symbol),quoteVolume24h:m.quoteVolume24h}));
 }
 function fullMarketSnapshot(core,now=Date.now()){
   const rows=new Map(core.symbols.map(x=>[x.symbol,{...x,checked:!!(MARKETS.get(x.symbol)?.quoteCheckedAt&&now-MARKETS.get(x.symbol).quoteCheckedAt<45000)}]));

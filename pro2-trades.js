@@ -11,7 +11,9 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false,onTrade=()=>{}})
   const records=new Map(), observer=createObserver({markets}),lastSeen=new Map(),leases=new Map(),latestPrint=new Map();
   const errors={binance:'',okx:'',coin:''}, reconnects={binance:0,okx:0,coin:0};
   const connections={binanceBase:null,okxBase:null,binanceWatch:null,okxWatch:null,coinBase:null,coinWatch:null};
-  let timer=null;
+  let timer=null,pulseCache=null;
+  const coreSymbols=new Set(['BTCUSDT','BTCUSDC','ETHUSDT','ETHUSDC','ZECUSDT']);
+  const shardSize=40,shardRetry=new Map(),owners=new Map(),lastAggId=new Map();
   const limit={binance:5,okx:10,coin:0},activeWatchLimit=5;
   function eligible(m){return !!(m&&m.apiSymbol&&((m.exchange==='binance')||(m.exchange==='coin'&&m.contractSize>0)||(m.exchange==='okx'&&m.contractType==='SWAP'&&m.apiSymbol.endsWith('-USDT-SWAP')&&m.tradeUnitBase>0)))}
   function top(exchange){return [...markets.values()].filter(m=>eligible(m)&&m.exchange===exchange)
@@ -24,7 +26,7 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false,onTrade=()=>{}})
       .slice(0,activeWatchLimit);
   }
   function connected(ctx){return !!(ctx?.ws&&ctx.ws.readyState===1&&!ctx.closed)}
-  function active(symbol){return Object.values(connections).find(c=>connected(c)&&c.symbols.has(symbol))||null}
+  function active(symbol){const c=owners.get(symbol);return connected(c)?c:null}
   function observe(symbol,side,amount,at,price){
     if(!Number.isFinite(amount)||amount<=0||!Number.isFinite(price)||price<=0||!Number.isFinite(at)||Math.abs(Date.now()-at)>90_000)return false;
     if(side!=='buy'&&side!=='sell')return false;
@@ -46,8 +48,7 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false,onTrade=()=>{}})
     if(ctx.heartbeat)clearInterval(ctx.heartbeat);
     try{ctx.ws.close()}catch{}
   }
-  function open(exchange,kind,selected){
-    const slot=exchange+(kind==='Base'?'Base':'Watch');
+  function open(exchange,kind,selected,slot=exchange+(kind==='Base'?'Base':'Watch')){
     if(!selected.length||stopped())return;
     const by=new Map(selected.map(m=>[m.apiSymbol,m]));
     const base=exchange==='binance'?BINANCE_MARKET_WS+selected.map(m=>m.apiSymbol.toLowerCase()+'@aggTrade').join('/') : exchange==='coin'?'wss://dstream.binance.com/stream?streams='+selected.map(m=>m.apiSymbol.toLowerCase()+'@aggTrade').join('/'):OKX_PUBLIC_WS;
@@ -55,6 +56,7 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false,onTrade=()=>{}})
     try{ws=new WebSocket(base)}catch(err){errors[exchange]=String(err.message||err);reconnects[exchange]=Date.now()+10000;log(`PRO5_${exchange}_OPEN_FAIL ${errors[exchange]}`);return}
     const ctx={slot,exchange,kind,ws,selected,symbols:new Set(selected.map(m=>m.symbol)),startedAt:Date.now(),openedAt:0,lastPacketAt:0,lastTradeAt:0,received:0,discarded:0,confirmed:new Set(),closed:false,reason:'连接中'};
     connections[slot]=ctx;
+    for(const m of selected)owners.set(m.symbol,ctx);
     log(`PRO5_${exchange.toUpperCase()}_${kind.toUpperCase()}_CONNECT symbols=${selected.length}`);
     ws.addEventListener('open',()=>{
       ctx.openedAt=Date.now();ctx.reason='等待真实成交';errors[exchange]='';
@@ -64,6 +66,7 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false,onTrade=()=>{}})
       }
     });
     ws.addEventListener('message',event=>{
+      if(ctx.closed||connections[slot]!==ctx)return;
       ctx.lastPacketAt=Date.now();
       try{
         const raw=typeof event.data==='string'?event.data:String(event.data);
@@ -75,6 +78,9 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false,onTrade=()=>{}})
           if(t?.e!=='aggTrade')return;
           const m=by.get(t.s);if(!m){ctx.discarded++;return}
           const at=+t.T,amount=exchange==='coin'?(+t.q)*m.contractSize:(+t.p)*(+t.q);
+          const id=Number(t.a),prevId=lastAggId.get(m.symbol);
+          if(Number.isSafeInteger(id)&&prevId!=null&&id<=prevId)return;
+          if(Number.isSafeInteger(id))lastAggId.set(m.symbol,id);
           if(observe(m.symbol,t.m?'sell':'buy',amount,at,+t.p)){ctx.received++;ctx.lastTradeAt=Date.now();ctx.confirmed.add(m.symbol)}else ctx.discarded++;
         }else{
           if(msg.event==='error'){errors[exchange]=String(msg.msg||'订阅失败').slice(0,160);log(`PRO5_OKX_SUB_ERROR ${errors[exchange]}`);return}
@@ -96,46 +102,54 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false,onTrade=()=>{}})
     });
     ws.addEventListener('close',e=>{
       if(ctx.heartbeat)clearInterval(ctx.heartbeat);
-      if(connections[slot]===ctx){connections[slot]=null;reconnects[exchange]=Date.now()+10000}
+      if(connections[slot]===ctx){connections[slot]=null;shardRetry.set(slot,Date.now()+10000);}
       if(!ctx.closed)log(`PRO5_${exchange}_CLOSE code=${e?.code||'?'} received=${ctx.received}`);
       ctx.closed=true;
-      for(const m of selected){if(!active(m.symbol))observer.reset(m.symbol)}
+      for(const m of selected){if(owners.get(m.symbol)===ctx){owners.delete(m.symbol);observer.reset(m.symbol);lastSeen.delete(m.symbol);latestPrint.delete(m.symbol);records.delete(m.symbol);}}
     });
   }
-  function watch(symbol){
-    const m=markets.get(symbol);
-    if(!eligible(m))return false;
-    leases.delete(symbol);leases.set(symbol,Date.now());
-    // Do not disrupt the stable top-liquidity subscription for a detail request.
-    syncWatch(m.exchange);return true;
+  function watch(symbol){return eligible(markets.get(symbol))}
+  function desiredShards(){
+    const result=new Map();
+    const bin=[...markets.values()].filter(m=>eligible(m)&&m.exchange==='binance');
+    const core=bin.filter(m=>coreSymbols.has(m.symbol)).sort((a,b)=>a.symbol.localeCompare(b.symbol));
+    if(core.length)result.set('binanceBase',{exchange:'binance',selected:core});
+    for(const ex of ['binance','coin','okx']){
+      const list=[...markets.values()].filter(m=>eligible(m)&&m.exchange===ex&&!(ex==='binance'&&coreSymbols.has(m.symbol))).sort((a,b)=>a.symbol.localeCompare(b.symbol));
+      for(let i=0;i<list.length;i+=shardSize)result.set(ex+'Shard'+Math.floor(i/shardSize),{exchange:ex,selected:list.slice(i,i+shardSize)});
+    }
+    return result;
   }
-  function syncWatch(exchange){
-    const slot=exchange+'Watch';const target=selectedForWatch(exchange);
-    const prev=connections[slot];
-    if(prev&&target.map(m=>m.symbol).join(',')===prev.selected.map(m=>m.symbol).join(',')&&(connected(prev)||prev.ws?.readyState===0))return;
-    if(prev)close(prev,'更新当前查看合约');
-    connections[slot]=null;
-    if(target.length)open(exchange,'Watch',target);
+  function retire(slot,ctx,reason){
+    if(!ctx)return;
+    close(ctx,reason);
+    if(connections[slot]===ctx)delete connections[slot];
+    for(const m of ctx.selected)if(owners.get(m.symbol)===ctx){
+      owners.delete(m.symbol);observer.reset(m.symbol);lastSeen.delete(m.symbol);latestPrint.delete(m.symbol);records.delete(m.symbol);
+    }
   }
   function tick(){
     if(stopped())return;
-    const time=Date.now();
-    for(const ex of ['binance','okx','coin']){
-      const key=ex+'Base',ctx=connections[key];
-      if(ctx&&connected(ctx)){
-        // BTC/ETH should deliver quickly; an open but silent obsolete route is not healthy.
-        if(ctx.openedAt&&ctx.received===0&&time-ctx.openedAt>35000){errors[ex]='已连接但35秒内未收到真实成交：检查数据流路由/网络';log(`PRO5_${ex}_SILENT_OPEN ${ctx.received}`);close(ctx,'连接后无成交');connections[key]=null;reconnects[ex]=time+10000;}
-        else if(ctx.lastTradeAt&&time-ctx.lastTradeAt>90000){errors[ex]='成交流已超过90秒未更新';close(ctx,'成交停止更新');connections[key]=null;reconnects[ex]=time+10000}
-      }else if(ctx&&ctx.openedAt===0&&time-ctx.startedAt>20000){close(ctx,'连接超时');connections[key]=null;reconnects[ex]=time+10000}
-      if(!connections[key]&&time>=reconnects[ex]){const base=top(ex);if(base.length)open(ex,'Base',base)}
-      const watchCtx=connections[ex+'Watch'];
-      if(watchCtx&&connected(watchCtx)&&watchCtx.lastTradeAt&&time-watchCtx.lastTradeAt>120000){close(watchCtx,'动态监测连接停止更新');connections[ex+'Watch']=null}
-      const expected=selectedForWatch(ex).map(m=>m.symbol).join(',');
-      if((!watchCtx||(!connected(watchCtx)&&watchCtx.ws?.readyState!==0)||expected!==watchCtx.selected.map(m=>m.symbol).join(','))){
-        if(watchCtx)close(watchCtx,'动态监测名单更新');connections[ex+'Watch']=null;
-        if(expected&&time>=reconnects[ex])syncWatch(ex);
+    const time=Date.now(),wanted=desiredShards();
+    // Remove outdated shards before opening replacements so a symbol is never double counted.
+    for(const [slot,ctx] of Object.entries(connections)){
+      if(!ctx){delete connections[slot];continue}
+      const target=wanted.get(slot);
+      if(!target||target.selected.map(m=>m.symbol).join('|')!==ctx.selected.map(m=>m.symbol).join('|')){
+        retire(slot,ctx,'合约目录更新');continue;
+      }
+      if(ctx.closed||(!connected(ctx)&&time-ctx.startedAt>20000)||(connected(ctx)&&time-(ctx.lastTradeAt||ctx.openedAt)>90000)){
+        retire(slot,ctx,'成交流超时');shardRetry.set(slot,time+10000);
       }
     }
+    // Stagger connection establishment and reconnects; do not create hundreds at once.
+    let opened=0;
+    for(const [slot,target] of wanted){
+      if(connections[slot]||time<(shardRetry.get(slot)||0))continue;
+      open(target.exchange,'Shard',target.selected,slot);shardRetry.set(slot,time+10000);
+      if(++opened>=2)break;
+    }
+    for(const key of lastAggId.keys())if(!markets.has(key))lastAggId.delete(key);
   }
   function status(symbol){
     const ctx=active(symbol),last=lastSeen.get(symbol)||0,age=Date.now()-last;
@@ -145,17 +159,17 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false,onTrade=()=>{}})
     return {connected:true,received:true,ready:true,latestAt:last,ageMs:age,openedAt:ctx.openedAt};
   }
   function getMicro(symbol){const s=status(symbol);if(!s.connected)return {covered:false,ready:false,reason:s.reason};if(!s.ready)return {covered:true,ready:false,reason:s.reason,latestAt:s.latestAt||null};return observer.stats(symbol,true)}
-  function getStats(symbol){const s=status(symbol),start=floorHour(Date.now()),v=records.get(symbol);if(!s.ready)return {covered:false,ready:false,threshold:MILLION,reason:s.reason};return {covered:true,ready:true,threshold:MILLION,windowStart:start,partial:true,buy:v?.start===start?v.buy:0,sell:v?.start===start?v.sell:0,buyCount:v?.start===start?v.buyCount:0,sellCount:v?.start===start?v.sellCount:0,latestAt:v?.start===start?v.latestAt:null,firstObservedAt:s.openedAt,label:'100万计价币种单位门槛的交易所聚合成交，不等于大户账户或全部真实交易',quoteAsset:markets.get(symbol)?.quoteAsset||'USDT'};}
+  function getStats(symbol){const s=status(symbol),start=floorHour(Date.now()),v=records.get(symbol);if(!s.ready)return {covered:s.connected,ready:false,threshold:MILLION,reason:s.reason};return {covered:true,ready:true,threshold:MILLION,windowStart:start,partial:true,buy:v?.start===start?v.buy:0,sell:v?.start===start?v.sell:0,buyCount:v?.start===start?v.buyCount:0,sellCount:v?.start===start?v.sellCount:0,latestAt:v?.start===start?v.latestAt:null,firstObservedAt:s.openedAt,label:'100万计价币种单位门槛的交易所聚合成交，不等于大户账户或全部真实交易',quoteAsset:markets.get(symbol)?.quoteAsset||'USDT'};}
   function getLatestPrint(symbol){return latestPrint.get(symbol)||null;}
   function getSwing(symbol){const s=status(symbol);return s.ready?observer.swing(symbol):{version:'ssr-research-v1',ready:false,reason:s.reason,periods:[]};}
-  function getMarketPulse(){return observer.marketPulse(symbol=>status(symbol).ready)}
+  function getMarketPulse(){const now=Date.now();if(!pulseCache||now-pulseCache.at>=5000)pulseCache={at:now,value:observer.marketPulse(symbol=>status(symbol).ready)};return pulseCache.value}
   function health(){
-    const out={version:'routed-aggtrade-v5',serverTime:Date.now(),errors:{...errors},sources:{},tracked:0,active:0,receiving:0};
+    const out={version:'all-market-aggtrade-v6',serverTime:Date.now(),errors:{...errors},sources:{},tracked:0,active:0,receiving:0};
     for(const [key,c] of Object.entries(connections))out.sources[key]=c?{connected:connected(c),monitored:c.selected.length,openedAt:c.openedAt,received:c.received,lastPacketAt:c.lastPacketAt,lastTradeAt:c.lastTradeAt,discarded:c.discarded,reason:c.reason}:{connected:false,monitored:0};
     const symbols=new Set(Object.values(connections).flatMap(c=>c?.selected.map(m=>m.symbol)||[]));out.tracked=symbols.size;
     for(const sym of symbols){const s=status(sym);if(s.connected)out.active++;if(s.ready)out.receiving++}
     return out;
   }
-  return {start(){if(timer)return;tick();timer=setInterval(tick,5000);timer.unref?.()},stop(){if(timer)clearInterval(timer);timer=null;for(const key of Object.keys(connections)){close(connections[key],'停止');connections[key]=null;}},watch,getStats,getMicro,getSwing,getLatestPrint,getMarketPulse,health,_test:{observe,tick,status,connections}};
+  return {start(){if(timer)return;tick();timer=setInterval(tick,5000);timer.unref?.()},stop(){if(timer)clearInterval(timer);timer=null;for(const key of Object.keys(connections)){close(connections[key],'停止');connections[key]=null;}},watch,getStats,getMicro,getSwing,getLatestPrint,getMarketPulse,health,_test:{observe,tick,status,connections,desiredShards}};
 }
 module.exports={createPro2Trades};
