@@ -55,6 +55,7 @@
       Number(b.multi)-Number(a.multi)||(b.quoteVolume24h||0)-(a.quoteVolume24h||0);
     return list.sort(sort);
   }
+  function marketChangeText(m){return m.stale?(m.checked?'最近报价已核验 · 暂无新行情':'报价待更新'):m.change24h==null?'—':(m.change24h>=0?'+':'')+n(m.change24h)+'%'}
   function row(m){const pinned=store.pins.has(m.symbol),faved=store.favorites.has(m.symbol),name=m.displaySymbol||m.symbol;
     const tags=m.matches?.flatMap(h=>h.names.slice(0,3).map(x=>`<span class="tag ${cls(h.direction)}">${esc(x)}</span>`))||[];
     const signal=tags.length?tags.slice(0,4).join(''):'<span class="tag">'+(m.quoteOnly?'公开行情':m.ready?'未命中形态':'待2H数据')+'</span>';
@@ -69,7 +70,7 @@
       </div><div class="row-meta"><span class="venue">${esc(m.exchangeLabel)}</span>${signal}</div>
       <div class="market-sub">${m.ready?'2H收盘 '+tm(m.closedAt):esc(m.reason||'待真实K线')}${diff?' · '+esc(diff):''}</div>
       <div class="market-sub">${esc(coverage)}</div></div>
-      <div class="market-side"><div class="market-price">${price(m.price)}</div><div class="market-change ${m.change24h>=0?'positive':'negative'}">${m.stale?'报价待更新':m.change24h==null?'—':(m.change24h>=0?'+':'')+n(m.change24h)+'%'}</div><div class="market-dir ${cls(m.direction)}">${m.quoteOnly?'仅行情':direction(m.direction)}</div></div>
+      <div class="market-side"><div class="market-price">${price(m.price)}</div><div class="market-change ${m.stale?'':m.change24h>=0?'positive':'negative'}">${marketChangeText(m)}</div><div class="market-dir ${cls(m.direction)}">${m.quoteOnly?'仅行情':direction(m.direction)}</div></div>
     </article>`;
   }
   function renderMarkets(){const all=activeRows(),shown=all.slice(0,store.max);
@@ -751,5 +752,27 @@
   swingDialog.addEventListener('close',()=>{resetReviewReminder();swingGeneration++;clearInterval(swingTimer);clearInterval(quoteTimer);clearInterval(quoteAgeTimer);swingTimer=null;quoteTimer=null;quoteAgeTimer=null;swingQuote=null});
 
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='visible')clearReviewPulse();if(document.visibilityState==='visible'){if(swingDialog.open){void refreshSwingQuote();void refreshSwing()}if(store.classicOpen)void refreshClassicLive()}});
-  void refresh();setInterval(refresh,9000);setInterval(()=>{if(store.snap&&Date.now()-store.lastDetail>=4700)void refreshDetail()},5000);
+  let quoteListBusy=false;
+  async function refreshMarketQuotes(){
+    if(quoteListBusy||!store.snap||document.visibilityState!=='visible'||document.body.dataset.proView!=='market')return;
+    quoteListBusy=true;
+    try{
+      const d=await get('/api/pro2/quotes');
+      if(!Array.isArray(d.rows))return;
+      const by=new Map(d.rows.map(x=>[x.symbol,x]));
+      for(const m of store.snap.symbols){
+        const q=by.get(m.symbol);if(!q)continue;
+        if(q.priceAt>=(m.priceAt||0)){m.price=q.price;m.priceAt=q.priceAt;m.change24h=q.change24h;m.stale=q.stale;}
+        m.checked=q.checked;
+      }
+      const markets=new Map(store.snap.symbols.map(m=>[m.symbol,m]));
+      for(const el of $('markets').querySelectorAll('[data-row]')){
+        const m=markets.get(el.dataset.row);if(!m)continue;
+        const p=el.querySelector('.market-price'),change=el.querySelector('.market-change');
+        if(p)p.textContent=price(m.price);
+        if(change){change.textContent=marketChangeText(m);change.classList.toggle('positive',!m.stale&&m.change24h>=0);change.classList.toggle('negative',!m.stale&&m.change24h<0);}
+      }
+    }catch{}finally{quoteListBusy=false}
+  }
+  void refresh();setInterval(refresh,9000);setInterval(refreshMarketQuotes,2000);setInterval(()=>{if(store.snap&&Date.now()-store.lastDetail>=4700)void refreshDetail()},5000);
 })();

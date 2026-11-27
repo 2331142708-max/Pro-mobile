@@ -522,60 +522,52 @@ async function initBinance(){
   connectBinanceWS();void refreshBinanceBooks();
  }catch(e){errorStatus('binance',e);initStarted=false;if(!stop)setTimeout(initBinance,20000).unref()}
 }
-function connectBinanceWS(){
-  if(stop||!MARKETS.size)return;
-  try{
-    const streams=[...MARKETS.values()].filter(m=>allowedSymbol(m.symbol)&&m.exchange==='binance').map(m=>m.apiSymbol.toLowerCase()+'@miniTicker');
-    if(!streams.length)return;
-    const ws=new WebSocket(BINANCE_WS+streams.join('/'));state.wsB=ws;
-    ws.addEventListener('open',()=>{
-      state.binance.ws=true;state.binance.connected=true;state.binance.error='';state.binance.at=Date.now();
-      log('币安五合约实时报价WebSocket已连接');
-      const streams=ENABLE_LEGACY?[...MARKETS.values()].filter(m=>m.exchange==='binance').map(m=>m.apiSymbol.toLowerCase()+'@kline_15m'):[];
-      let idx=0;
-      const subscribe=()=>{
-        if(ws.readyState!==WebSocket.OPEN)return;
-        if(idx>=streams.length)return;
-        const items=streams.slice(idx,idx+45);idx+=45;
-        ws.send(JSON.stringify({method:'SUBSCRIBE',params:items,id:idx}));
-        setTimeout(subscribe,500).unref();
-      };subscribe();
-    });
-    ws.addEventListener('message',event=>{
-      try{
-        const packet=JSON.parse(String(event.data));
-        const d=packet.data??packet;
-        if(Array.isArray(d)||d?.e==='24hrMiniTicker'){
-          for(const t of Array.isArray(d)?d:[d]){
-            const m=MARKETS.get(t.s);if(!m)continue;
-            const p=safeNumber(t.c),q=safeNumber(t.q);
-            const tAt=safeNumber(t.E);
-            if(!tAt||Math.abs(Date.now()-tAt)>60000)continue;
-          if(p>0&&tAt>=m.priceAt){m.price=p;m.priceAt=tAt}
-            if(q>0)m.quoteVolume24h=q;
-            if(Number.isFinite(+t.o)&&p>0)m.change24h=(p/(+t.o)-1)*100;
-          }
-        }else if(d.e==='kline'&&d.k){
-          const m=MARKETS.get(d.s);if(!m)return;
-          const k=binanceBar(d.k);
-          if(d.k.i!=='15m')return;
-          receiveBars(m,[k],true);
-          const at=safeNumber(d.E,Date.now());
-          if(k.c>0 && at>=m.priceAt){m.price=k.c;m.priceAt=at;}
-          m.klineAt=Date.now();
-        }
-        state.binance.at=Date.now();
-      }catch(e){log(`币安WS解码失败: ${e.message}`)}
-    });
-    ws.addEventListener('error',()=>{state.binance.error='实时行情连接错误'});
-    ws.addEventListener('close',()=>{
-      if(state.wsB!==ws)return;
-      state.binance.ws=false;state.binance.connected=false;
-      state.binance.error='WS断开，等待重连';
-      if(!stop)setTimeout(connectBinanceWS,6000).unref();
-    });
-  }catch(e){errorStatus('binance',e);setTimeout(connectBinanceWS,7000).unref()}
+// Exchange-wide public ticker streams; changed symbols arrive in arrays.
+const quoteStreams=new Map();
+function applyMarketTicker(exchange,t,now=Date.now()){
+  const key=(exchange==='coin'?'COIN:':'')+String(t?.s||''),m=MARKETS.get(key);
+  if(!m||m.exchange!==exchange)return false;
+  const p=Number(t.c),at=Number(t.E),open=Number(t.o);
+  if(!Number.isFinite(p)||p<=0||!Number.isFinite(at)||at<=0||now-at>60000||at>now+1000||at<(m.priceAt||0))return false;
+  m.price=p;m.priceAt=at;
+  if(Number.isFinite(open)&&open>0)m.change24h=100*(p/open-1);
+  if(exchange==='binance'&&Number.isFinite(Number(t.q))&&Number(t.q)>=0)m.quoteVolume24h=Number(t.q);
+  return true;
 }
+function connectMarketQuotes(exchange){
+  if(stop||quoteStreams.has(exchange))return;
+  let ws;
+  try{
+    ws=new WebSocket(exchange==='coin'?'wss://dstream.binance.com/stream?streams=!miniTicker@arr':BINANCE_WS+'!miniTicker@arr');
+  }catch(e){if(!stop)setTimeout(()=>connectMarketQuotes(exchange),7000).unref();return}
+  const ctx={ws,openedAt:0,lastPacketAt:Date.now()};
+  quoteStreams.set(exchange,ctx);
+  if(exchange==='binance')state.wsB=ws;
+  ws.addEventListener('open',()=>{
+    if(quoteStreams.get(exchange)!==ctx)return;
+    ctx.openedAt=ctx.lastPacketAt=Date.now();
+    if(exchange==='binance'){state.binance.ws=true;state.binance.connected=true;state.binance.error='';state.binance.at=ctx.lastPacketAt;}
+    log('PUBLIC_ALL_TICKERS_CONNECTED '+exchange);
+  });
+  ws.addEventListener('message',event=>{
+    if(quoteStreams.get(exchange)!==ctx||stop)return;
+    try{
+      const packet=JSON.parse(String(event.data)),data=packet.data??packet;
+      const rows=Array.isArray(data)?data:[data],now=Date.now();
+      let count=0;
+      for(const t of rows)if(t?.e==='24hrMiniTicker'||t?.e==='24hrTicker')if(applyMarketTicker(exchange,t,now))count++;
+      if(rows.some(t=>t?.e==='24hrMiniTicker'||t?.e==='24hrTicker')){ctx.lastPacketAt=now;if(exchange==='binance')state.binance.at=now;}
+    }catch(e){log('PUBLIC_TICKER_PARSE '+exchange+' '+String(e.message||e).slice(0,100))}
+  });
+  ws.addEventListener('error',()=>{if(exchange==='binance')state.binance.error='实时行情连接错误';try{ws.close()}catch{}});
+  ws.addEventListener('close',()=>{
+    if(quoteStreams.get(exchange)!==ctx)return;
+    quoteStreams.delete(exchange);
+    if(exchange==='binance'){state.binance.ws=false;state.binance.connected=false;state.binance.error='WS断开，等待重连';}
+    if(!stop)setTimeout(()=>connectMarketQuotes(exchange),6000).unref();
+  });
+}
+function connectBinanceWS(){connectMarketQuotes('binance');connectMarketQuotes('coin')}
 function updateBook(m,bid,ask,at){
   if(+bid>0&&+ask>=+bid&&at>=(m.book?.at||0))m.book={bid:+bid,ask:+ask,at};
 }
@@ -1613,7 +1605,7 @@ async function refreshPublicCatalog(){
         let m=MARKETS.get(x.symbol);
         if(!m){m=newMarket(x.symbol,x.price||0,x.quoteVolume24h);m.priceAt=0;MARKETS.set(x.symbol,m)}
         m.exchange=x.exchange;m.exchangeLabel=x.exchangeLabel;m.apiSymbol=x.displaySymbol;m.displaySymbol=x.displaySymbol;m.quoteAsset=x.quoteAsset;m.contractType=x.contractType;m.contractSize=x.contractSize;
-        if(x.price>0&&x.priceAt>=(m.priceAt||0)){m.price=x.price;m.priceAt=x.priceAt}
+        if(x.price>0&&x.priceAt>0&&x.priceAt<=now+1000){m.quoteCheckedAt=now;if(x.priceAt>=(m.priceAt||0)){m.price=x.price;m.priceAt=x.priceAt}}
         if(Number.isFinite(x.change24h))m.change24h=x.change24h;
         m.quoteVolume24h=x.quoteVolume24h||m.quoteVolume24h||0;
         if(!researchSymbols.includes(x.symbol))researchSymbols.push(x.symbol);
@@ -1622,8 +1614,11 @@ async function refreshPublicCatalog(){
     }catch{publicCatalog.set(v.key,{...prev,error:true});}
   }));}finally{catalogBusy=false}
 }
+function publicQuoteRows(now=Date.now()){
+  return [...MARKETS.values()].map(m=>({symbol:m.symbol,price:m.price,priceAt:m.priceAt,change24h:m.change24h,stale:!(m.price>0&&m.priceAt>0&&Math.abs(now-m.priceAt)<60000),checked:!!(m.quoteCheckedAt&&now-m.quoteCheckedAt<45000)}));
+}
 function fullMarketSnapshot(core,now=Date.now()){
-  const rows=new Map(core.symbols.map(x=>[x.symbol,x]));
+  const rows=new Map(core.symbols.map(x=>[x.symbol,{...x,checked:!!(MARKETS.get(x.symbol)?.quoteCheckedAt&&now-MARKETS.get(x.symbol).quoteCheckedAt<45000)}]));
   for(const v of catalogVenues){const cache=publicCatalog.get(v.key);for(const x of cache?.rows||[]){if(!rows.has(x.symbol))rows.set(x.symbol,{...x,stale:!!x.stale||now-x.priceAt>45000||now-(cache?.at||0)>45000});}}
   return {...core,symbols:[...rows.values()],catalog:{count:rows.size,researchCount:core.counts.eligible,venues:catalogVenues.map(v=>({label:v.label,count:publicCatalog.get(v.key)?.rows?.length||0,at:publicCatalog.get(v.key)?.at||0,error:!!publicCatalog.get(v.key)?.error}))}};
 }
@@ -1640,6 +1635,7 @@ const server=http.createServer((req,res)=>{
   if(url.pathname==='/api/ui-error'){log('PRO_FRONTEND_ERROR '+(url.searchParams.get('message')||'unknown').slice(0,200));return reply(res,200,{ok:true})}
   if(url.pathname==='/api/pro2/signal-lab')return reply(res,200,{...signalLab.snapshot(),shortStudy:shortStudy.snapshot()});
   if(url.pathname==='/api/pro2/snapshot')return reply(res,200,fullMarketSnapshot(pro2.snapshot(pro2Trades)));
+  if(url.pathname==='/api/pro2/quotes')return reply(res,200,{serverAt:Date.now(),rows:publicQuoteRows()});
   if(url.pathname==='/api/pro2/flow-health')return reply(res,200,pro2Trades.health());
   if(url.pathname==='/api/pro2/detail'){
     const symbol=(url.searchParams.get('symbol')||'').toUpperCase();
@@ -1685,7 +1681,7 @@ const server=http.createServer((req,res)=>{
   });
 });
 server.listen(PORT,'127.0.0.1',()=>{
-  pro2.start();pro2Trades.start();void refreshPublicCatalog();catalogTimer=setInterval(refreshPublicCatalog,15000);catalogTimer.unref?.();signalLab.flush();shortStudy.flush();swingFollow.flush();horizonAudit.flush();trendReviewTimer=setInterval(sampleTrendReview,15000);trendReviewTimer.unref?.();void sampleTrendReview();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
+  pro2.start();pro2Trades.start();connectBinanceWS();void refreshPublicCatalog();catalogTimer=setInterval(refreshPublicCatalog,15000);catalogTimer.unref?.();signalLab.flush();shortStudy.flush();swingFollow.flush();horizonAudit.flush();trendReviewTimer=setInterval(sampleTrendReview,15000);trendReviewTimer.unref?.();void sampleTrendReview();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
   log(`合约实时数据Pro v9代 本地运行: http://localhost:${PORT}`);
   if(ENABLE_LEGACY)stopPatternFeed=startPatternFeed({markets:MARKETS,json,binance:BINANCE,okx:OKX,
     okxWs:OKX_WS,stopped:()=>stop,log});
@@ -1698,7 +1694,7 @@ server.listen(PORT,'127.0.0.1',()=>{
 function shutdown(){stop=true;clearInterval(binanceTimer);clearInterval(okxTimer);
   clearTimeout(saveTimer);persistSignals();reviewHistory.save();paper.save();
   clearInterval(signalLabTimer);clearInterval(catalogTimer);clearInterval(trendReviewTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();signalLab.flush();swingFollow.flush();horizonAudit.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
-  state.wsB?.close();
+  for(const ctx of quoteStreams.values())try{ctx.ws.close()}catch{}
   server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),2000).unref();
 }
 process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);
@@ -1733,12 +1729,15 @@ async function recoverQuotes(){
   finally{proQuotesBusy=false}
 }
 const proWatch=setInterval(()=>{
-  if(stop||!state.wsB||state.wsB.readyState!==WebSocket.OPEN)return;
-  const now=Date.now(),age=now-state.binance.at;
-  if(age>26000){
-    log('PRO_WS_STALL_RECONNECT '+age);
-    state.binance.ws=false;state.binance.error='实时行情停止更新，自动重连';
-    try{state.wsB.close(4000,'stalled feed')}catch(e){}
+  if(stop)return;
+  const now=Date.now();
+  for(const exchange of ['binance','coin']){
+    const ctx=quoteStreams.get(exchange);
+    if(!ctx){connectMarketQuotes(exchange);continue}
+    if(now-ctx.lastPacketAt>26000){
+      log('PUBLIC_TICKER_STALL '+exchange);
+      try{ctx.ws.close(4000,'stalled feed')}catch{}
+    }
   }
 },12000);
 proWatch.unref();
