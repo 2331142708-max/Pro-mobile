@@ -477,7 +477,7 @@
 
   function swingClosedLab(v){
     const d=v.closedLab,guard=d?.lossGuard;
-    if(!d)return '<section class="swing-card"><h3>模拟阈值 · 历史复核</h3><p>仅 BTCUSDT 五套一致性研究的已完成样本。</p></section>';
+    if(!d)return '<section class="swing-card"><h3>模拟阈值 · 历史复核</h3><p>旧短线模拟已归档；请在实时模拟页查看1小时反向研究报表。</p></section>';
     const signed=x=>Number.isFinite(x)?(x>0?'+':'')+x.toFixed(2)+' U':'—';
     const stamp=t=>Number.isFinite(t)?new Date(t).toLocaleTimeString('zh-CN',{hour12:false}):'—';
     const rows=(d.history||[]).map(x=>'<div class="swing-closed-row"><div><b>'+esc(x.label)+'</b><small>'+stamp(x.exitAt)+' · 已完成 · '+(x.reason==='tp'?'历史正阈值触及':'历史负阈值触及')+'</small></div><div class="swing-closed-prices"><span>历史参考价<strong>'+price(x.entry)+'</strong></span><span>实际结束价<strong>'+price(x.exit)+'</strong></span><span>观测理论结果<strong>'+signed(x.observedPnl)+'</strong></span></div></div>').join('');
@@ -541,7 +541,7 @@
     const stamp=t=>Number.isFinite(t)&&t>0?new Date(t).toLocaleString('zh-CN',{hour12:false}):'—';
     return '<div class="swing-dashboard">'+
       '<section class="sd-quote"><div class="sd-quote-line"><span>'+esc(v.symbol||store.symbol)+' · 公开行情</span><strong id="swingLivePrice">—</strong></div><div id="swingQuoteStatus">等待独立公开报价</div></section>'+
-      '<section class="sd-box sd-historical"><button class="sd-section-title" type="button" data-swing-screen="prices">已结束模拟 · 历史价格 <span>详情 ›</span></button><div class="sd-prices">'+priceCell('模拟参考价',last?.entry)+priceCell('止盈复核价',last?.reason==='tp'?last.exit:null)+priceCell('止损复核价',last?.reason==='sl'?last.exit:null)+'</div><div class="sd-foot">'+(last?esc(last.label)+' · '+stamp(last.exitAt):'暂无对应历史记录')+(guard?.stoppedAt?' · 模拟已停止新增':'')+'</div></section>'+
+      '<section class="sd-box sd-historical"><button class="sd-section-title" type="button" data-swing-screen="prices">已结束模拟 · 历史价格 <span>详情 ›</span></button><div class="sd-prices">'+priceCell('模拟参考价',last?.entry)+priceCell('止盈复核价',last?.reason==='tp'?last.exit:null)+priceCell('止损复核价',last?.reason==='sl'?last.exit:null)+'</div><div class="sd-foot">'+(last?esc(last.label)+' · '+stamp(last.exitAt):'旧模拟已归档 · 请查看实时模拟页')+(guard?.stoppedAt?' · 模拟已停止新增':'')+'</div></section>'+
       '<div class="sd-state-grid"><button type="button" data-swing-screen="risk" class="sd-box sd-risk sd-risk-'+level+'"><small>已观测风险 ›</small><b>'+riskLabels[level]+'</b><small>'+ (riskNotes||'仅评估已观测项目')+'</small></button><button type="button" data-swing-screen="stage" class="sd-box sd-stage"><small>原SSR · 已发生阶段 ›</small><b>'+esc(stage)+'</b><small>前：未确认　中：'+(observed?'已观察':'未确认')+'　后：未确认</small></button></div>'+
       '<button type="button" class="sd-box sd-follow" data-swing-screen="follow"><span>60秒追踪 · '+esc(fLabels[f?.stage]||'等待数据')+'</span><b>'+(elapsed===null?'—':elapsed+'/60秒')+' ›</b></button>'+
       '<section class="sd-box sd-models"><button class="sd-section-title" type="button" data-swing-screen="models">六模型 · 2–5分钟历史复核 <span>详情 ›</span></button><div class="sd-foot">同向/完成笔数 · 小字为平均最大反向幅度 · 时间为60秒观察完成时刻</div><table class="sd-table"><thead><tr><th scope="col" style="width:43%">模型</th><th scope="col">2分</th><th scope="col">3分</th><th scope="col">4分</th><th scope="col">5分</th></tr></thead><tbody>'+models+'</tbody></table></section>'+

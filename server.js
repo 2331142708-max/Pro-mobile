@@ -32,7 +32,7 @@ const paper=createPaperTrader({file:path.join(dataPath,reverse?'paper-reverse-or
   funding:reviewHistory.funding,quality:reviewHistory.paperQuality,durable:!!volumePath,log,trial,allMultiple,
   stoppedAt:Number(process.env.CONTRACT_LENS_PAPER_STOPPED_AT)||0,reverse});
 const MARKETS=new Map();
-const pro2=createPro2({markets:MARKETS,json,binance:BINANCE,okx:OKX,log,stopped:()=>stop,dataDir:dataPath,allowedSymbols:researchSymbols});
+const pro2=createPro2({markets:MARKETS,json,binance:BINANCE,okx:OKX,log,stopped:()=>stop,dataDir:dataPath,allowedSymbols:researchSymbols,onClosedBars:(m,rows,computed,t)=>reverseStudy.observe(m,rows,computed,t)});
 
 /* Read-only BTCUSDT signal lab imported from the supplied component's source
  * commit. Inlined to comply with the existing deployment file allowlist. */
@@ -355,8 +355,75 @@ function openShortStudy(file){
 }
 
 const shortStudy=openShortStudy(path.join(dataPath,'btc-short-observation-v1.json'));
-const signalLab=openSignalLab({file:path.join(dataPath,'swing-consensus-lab-btc-v1.json'),log});
-const pro2Trades=createPro2Trades({markets:MARKETS,log,stopped:()=>stop,onTrade:(symbol,price,at,side,amount)=>{if(symbol==='BTCUSDT'){signalLab.trade(symbol,price,at);shortStudy.onTrade(symbol,price,at,side,amount);horizonAudit.trade(symbol,price,at)}}});
+
+// Reverse-pattern retrospective paper study, isolated from current market views.
+// Reference is the first full hourly bar after observation, only evaluated once closed.
+// OHLC does not reveal intrabar order or actual fills.
+function createReverseStudy({initial=null,save=()=>{},now=Date.now,enabled=true,error=''}={}){
+  const step=3600000,capital=1000,margin=100,leverage=125,tp=20,lossLimit=500;
+  const state=initial||{version:1,startedAt:now(),accounts:{},history:[],total:{net:0,wins:0,exhausted:0,ambiguous:0,invalid:0,skipped:0},stoppedAt:null};
+  if(state.version!==1||!Number.isFinite(state.startedAt)||!state.accounts||!Array.isArray(state.history)||!state.total)throw Error('反向研究记录不兼容');
+  let alive=enabled&&!error,failure=error,dirty=!initial;
+  const round=x=>Math.round(x*100)/100;
+  function flush(){if(!alive||!dirty)return;try{save(state);dirty=false}catch(e){alive=false;failure='保存失败，研究已暂停'}}
+  function account(m){return state.accounts[m.symbol]||(state.accounts[m.symbol]={symbol:m.symbol,label:m.displaySymbol||m.symbol,balance:capital,peak:capital,drawdown:0,wins:0,exhausted:0,ambiguous:0,invalid:0,skipped:0,seenAt:0,pending:null})}
+  function finish(a,reason,at,pnl){
+    const p=a.pending;
+    if(!p)return;
+    if(reason==='tp'){a.wins++;state.total.wins++}
+    else if(reason==='exhausted'||reason==='ambiguous'){a.exhausted++;state.total.exhausted++;if(reason==='ambiguous'){a.ambiguous++;state.total.ambiguous++}}
+    else {a.invalid++;state.total.invalid++}
+    if(Number.isFinite(pnl)){a.balance=round(a.balance+pnl);state.total.net=round(state.total.net+pnl);a.peak=Math.max(a.peak,a.balance);a.drawdown=Math.max(a.drawdown,round(a.peak-a.balance));}
+    state.history.unshift({symbol:a.symbol,label:a.label,names:p.names,original:p.original,observedAt:p.observedAt,entryAt:p.entryAt??null,exitAt:at,durationMs:p.entryAt==null?null:Math.max(0,at-p.entryAt),reason,pnl:Number.isFinite(pnl)?pnl:null});
+    state.history=state.history.slice(0,2000);a.pending=null;dirty=true;
+    if(state.total.net<=-lossLimit&&!state.stoppedAt)state.stoppedAt=at;
+  }
+  function observe(m,rows,computed,t=now()){
+    if(!alive||!Array.isArray(rows)||!rows.length)return;
+    let a=state.accounts[m.symbol];
+    const p=a?.pending;
+    if(p){
+      const firstNeeded=p.nextAt??p.startAt;
+      if(rows[0].t>firstNeeded){finish(a,'gap',t,null)}
+      else for(const b of rows){
+        if(!a.pending)break;
+        if(b.t<(p.nextAt??p.startAt))continue;
+        if(b.t!==(p.nextAt??p.startAt)||b.t+step>t||!(b.o>0&&b.h>=b.o&&b.l>0&&b.l<=b.o)){finish(a,'gap',t,null);break}
+        if(p.entry==null){p.entry=b.o;p.entryAt=b.t;}
+        // Normalized theoretical P/L only, not actual exchange liquidation.
+        const direction=p.original==='up'?-1:1,notional=margin*leverage;
+        const best=direction*( (direction===1?b.h:b.l)/p.entry-1)*notional;
+        const worst=direction*( (direction===1?b.l:b.h)/p.entry-1)*notional;
+        const tpHit=best>=tp-1e-8, exhausted=worst<=-margin+1e-8;
+        if(exhausted||tpHit){finish(a,exhausted?(tpHit?'ambiguous':'exhausted'):'tp',b.t+step,exhausted?-margin:tp);break}
+        p.nextAt=b.t+step;dirty=true;
+      }
+    }
+    if(!computed?.ready||!Array.isArray(computed.matches)||computed.closedAt<state.startedAt||state.stoppedAt)return;
+    if(!computed.matches.length)return;
+    a=a||account(m);
+    if(a.seenAt>=computed.closedAt)return;
+    a.seenAt=computed.closedAt;dirty=true;
+    if(a.pending||a.balance<margin||a.drawdown>=lossLimit||computed.matches.length!==1){a.skipped++;state.total.skipped++;return}
+    const hit=computed.matches[0];
+    if(!['up','down'].includes(hit.direction)||!Array.isArray(hit.names)||!hit.names.length)return;
+    a.pending={original:hit.direction,names:[...new Set(hit.names)],observedAt:t,startAt:Math.ceil((t+1)/step)*step,entry:null,entryAt:null};
+  }
+  function snapshot(t=now()){
+    const list=Object.values(state.accounts);
+    return {version:'reverse-1h-review-v1',enabled:alive,error:failure,startedAt:state.startedAt,serverAt:t,config:{capital,margin,leverage,tp,lossLimit},stoppedAt:state.stoppedAt,total:state.total,accountCount:list.length,active:list.filter(a=>a.pending).length,accounts:list.map(a=>({symbol:a.symbol,label:a.label,balance:a.balance,net:round(a.balance-capital),wins:a.wins,exhausted:a.exhausted,ambiguous:a.ambiguous,invalid:a.invalid,skipped:a.skipped,drawdown:a.drawdown})).sort((a,b)=>a.symbol.localeCompare(b.symbol)),history:state.history.slice(0,100)};
+  }
+  return {observe,flush,snapshot};
+}
+function openReverseStudy(file){
+  let initial=null,error='';
+  try{if(fs.existsSync(file))initial=JSON.parse(fs.readFileSync(file,'utf8'))}catch{error='原研究记录读取失败'}
+  const save=state=>{fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+'.tmp';fs.writeFileSync(tmp,JSON.stringify(state),{mode:0o600});fs.renameSync(tmp,file)};
+  try{return createReverseStudy({initial,save,error})}catch{return createReverseStudy({enabled:false,error:'记录格式不兼容'})}
+}
+const reverseStudy=openReverseStudy(path.join(dataPath,'reverse-1h-pattern-review-v1.json'));
+
+const pro2Trades=createPro2Trades({markets:MARKETS,log,stopped:()=>stop,onTrade:(symbol,price,at,side,amount)=>{if(symbol==='BTCUSDT'){shortStudy.onTrade(symbol,price,at,side,amount);horizonAudit.trade(symbol,price,at)}}});
 
 // Retain observed SSR events, not future trade signals. The 60-second window
 // measures the outcome, rather than extending validity of the original rule.
@@ -454,7 +521,7 @@ const swingFollow=openSwingFollow(path.join(dataPath,'ssr-follow-v1.json'),resea
 let signalLabTimer=null;
 function scanSignalLab(){
   if(stop)return;
-  try{const now=Date.now();signalLab.sweep(now);horizonAudit.sweep(now);shortStudy.scan(now);for(const symbol of researchSymbols){if(!MARKETS.has(symbol)||(!allowedSymbol(symbol)&&!pro2Trades.getLatestPrint(symbol)))continue;const view=pro2Trades.getSwing(symbol);swingFollow.observe(symbol,view,now);if(symbol==='BTCUSDT')signalLab.scan(symbol,shortStudy.snapshot(now),now)}}
+  try{const now=Date.now();reverseStudy.flush();horizonAudit.sweep(now);shortStudy.scan(now);for(const symbol of researchSymbols){if(!MARKETS.has(symbol)||(!allowedSymbol(symbol)&&!pro2Trades.getLatestPrint(symbol)))continue;const view=pro2Trades.getSwing(symbol);swingFollow.observe(symbol,view,now)}}
   catch(e){log('SIGNAL_LAB_SCAN '+String(e.message||e).slice(0,120))}
 }
 
@@ -1633,7 +1700,7 @@ const server=http.createServer((req,res)=>{
   if(simRoute(req,res,url))return;
   if(req.method!=='GET')return reply(res,405,{error:'只允许GET；无交易/下单API'});
   if(url.pathname==='/api/ui-error'){log('PRO_FRONTEND_ERROR '+(url.searchParams.get('message')||'unknown').slice(0,200));return reply(res,200,{ok:true})}
-  if(url.pathname==='/api/pro2/signal-lab')return reply(res,200,{...signalLab.snapshot(),shortStudy:shortStudy.snapshot()});
+  if(url.pathname==='/api/pro2/signal-lab')return reply(res,200,reverseStudy.snapshot());
   if(url.pathname==='/api/pro2/snapshot')return reply(res,200,fullMarketSnapshot(pro2.snapshot(pro2Trades)));
   if(url.pathname==='/api/pro2/quotes')return reply(res,200,{serverAt:Date.now(),rows:publicQuoteRows()});
   if(url.pathname==='/api/pro2/flow-health')return reply(res,200,pro2Trades.health());
@@ -1657,7 +1724,7 @@ const server=http.createServer((req,res)=>{
     const symbol=(url.searchParams.get('symbol')||'').toUpperCase();
     const m=MARKETS.get(symbol);if(!m)return reply(res,404,{error:'合约不可用'});
     if(!pro2Trades.watch(symbol))return reply(res,200,{version:'ssr-research-v1',symbol,ready:false,reason:'该合约暂无支持的公开主动成交流',periods:[]});
-    return reply(res,200,{...pro2Trades.getSwing(symbol),symbol,exchangeLabel:m.exchangeLabel,shortStudy:swingStudySummary(symbol,shortStudy),trendReview:trendReviewView(symbol),follow:swingFollow.snapshot(symbol),horizonAudit:symbol==='BTCUSDT'?horizonAudit.snapshot():null,closedLab:symbol==='BTCUSDT'?(()=>{const d=signalLab.snapshot();return {enabled:d.enabled,lossGuard:d.lossGuard,history:d.history.filter(x=>['tp','sl'].includes(x.reason)&&Number.isFinite(x.entry)&&Number.isFinite(x.exit)).slice(0,10).map(x=>({label:x.label,entry:x.entry,exit:x.exit,exitAt:x.exitAt,reason:x.reason,pnl:x.pnl,observedPnl:x.observedPnl}))}})():null});
+    return reply(res,200,{...pro2Trades.getSwing(symbol),symbol,exchangeLabel:m.exchangeLabel,shortStudy:swingStudySummary(symbol,shortStudy),trendReview:trendReviewView(symbol),follow:swingFollow.snapshot(symbol),horizonAudit:symbol==='BTCUSDT'?horizonAudit.snapshot():null,closedLab:null});
   }
   if(url.pathname==='/api/pro2/health')return reply(res,200,pro2.state());
   if(url.pathname==='/api/paper')return reply(res,200,paper.snapshot(Date.now()));
@@ -1681,7 +1748,7 @@ const server=http.createServer((req,res)=>{
   });
 });
 server.listen(PORT,'127.0.0.1',()=>{
-  pro2.start();pro2Trades.start();connectBinanceWS();void refreshPublicCatalog();catalogTimer=setInterval(refreshPublicCatalog,15000);catalogTimer.unref?.();signalLab.flush();shortStudy.flush();swingFollow.flush();horizonAudit.flush();trendReviewTimer=setInterval(sampleTrendReview,15000);trendReviewTimer.unref?.();void sampleTrendReview();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
+  pro2.start();pro2Trades.start();connectBinanceWS();void refreshPublicCatalog();catalogTimer=setInterval(refreshPublicCatalog,15000);catalogTimer.unref?.();reverseStudy.flush();shortStudy.flush();swingFollow.flush();horizonAudit.flush();trendReviewTimer=setInterval(sampleTrendReview,15000);trendReviewTimer.unref?.();void sampleTrendReview();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
   log(`合约实时数据Pro v9代 本地运行: http://localhost:${PORT}`);
   if(ENABLE_LEGACY)stopPatternFeed=startPatternFeed({markets:MARKETS,json,binance:BINANCE,okx:OKX,
     okxWs:OKX_WS,stopped:()=>stop,log});
@@ -1693,7 +1760,7 @@ server.listen(PORT,'127.0.0.1',()=>{
 });
 function shutdown(){stop=true;clearInterval(binanceTimer);clearInterval(okxTimer);
   clearTimeout(saveTimer);persistSignals();reviewHistory.save();paper.save();
-  clearInterval(signalLabTimer);clearInterval(catalogTimer);clearInterval(trendReviewTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();signalLab.flush();swingFollow.flush();horizonAudit.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
+  clearInterval(signalLabTimer);clearInterval(catalogTimer);clearInterval(trendReviewTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();reverseStudy.flush();swingFollow.flush();horizonAudit.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
   for(const ctx of quoteStreams.values())try{ctx.ws.close()}catch{}
   server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),2000).unref();
 }

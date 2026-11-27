@@ -46,7 +46,7 @@ function analyzeBars(rows,now){
   const high=Math.max(...prev.map(b=>b.h)),low=Math.min(...prev.map(b=>b.l));
   return {ready:true,reason:'已收盘1小时K线',matches,bars:contiguous,volumeRatio,atr,rangeHigh:high,rangeLow:low,closedAt:last.t+STEP};
 }
-function createPro2({markets,json,binance,okx,log,stopped,dataDir,allowedSymbols=null}){
+function createPro2({markets,json,binance,okx,log,stopped,dataDir,allowedSymbols=null,onClosedBars=()=>{}}){
   const file=path.join(dataDir,'pro2-alerts-1h.json');
   const source=file;
   let alerts=[];
@@ -61,6 +61,7 @@ function createPro2({markets,json,binance,okx,log,stopped,dataDir,allowedSymbols
     const rows=[...new Map(parsed.map(b=>[b.t,b])).values()].sort((a,b)=>a.t-b.t).slice(-HISTORY);
     const computed=analyzeBars(rows,now);
     m.pro2={...computed,seenAt:now,lastAttempt:now,rows,error:null};
+    try{onClosedBars(m,rows,computed,now)}catch(err){log('REVERSE_REVIEW_ERROR '+String(err.message||err).slice(0,120))}
     if(computed.ready){
       for(const hit of computed.matches){
         const key=m.symbol+':'+hit.direction+':'+hit.closedAt;
