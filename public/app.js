@@ -524,7 +524,7 @@
       const cells=[2,3,4,5].map(minute=>{const w=m?.windows?.find(x=>x.minute===minute);
         return '<td>'+(w?.n?'<b>'+esc(w.same)+'/'+esc(w.n)+'</b><small>'+pct(w.meanAdverse)+'</small>':'—')+'</td>';
       }).join('');
-      return '<tr><th scope="row"><button type="button" data-swing-screen="models"><b>'+name+'</b><small>'+note+'</small></button></th>'+cells+'</tr>';
+      return '<tr data-review-model="'+esc(key)+'" data-review-direction="'+(last?.direction==='回升'?'up':last?.direction==='回落'?'down':'')+'"><th scope="row"><button type="button" data-swing-screen="models"><b>'+name+'</b><small>'+note+'</small></button></th>'+cells+'</tr>';
     }).join('');
     const periods=[1,3,5].map(minutes=>{const r=v.periods?.find(x=>x.minutes===minutes),ok=v.ready&&r?.ready;
       return '<tr><th scope="row">'+minutes+'分</th><td>'+(ok?swingPct(r.change):'—')+'</td><td>'+(ok?swingPct(r.rebound):'—')+'</td><td>'+(ok?swingPct(r.pullback):'—')+'</td><td>'+(ok&&r.buyPct!=null?pct(r.buyPct):'—')+'</td></tr>';
@@ -567,6 +567,7 @@
     const main=swingFullView==='overview';
     body.classList.toggle('sd-overview',main);
     body.innerHTML=main?swingDashboard(v):'<button type="button" class="sd-back" data-swing-screen="overview">‹ 返回全屏总览</button>'+ (views[swingFullView]||views.models);
+    paintReviewRows();
     for(const x of body.querySelectorAll('details[data-swing-fold]'))x.open=expanded.has(x.dataset.swingFold);
     if(swingFullView==='risk'){const r=body.querySelector('details[data-swing-fold="risk"]');if(r)r.open=true;}
     body.scrollTop=scroll;renderSwingQuote();
@@ -607,7 +608,7 @@
     }
     return {next,changed:[...changed]};
   }
-  let reviewSound=false,reviewAudio=null,reviewSeen=null,reviewLastNotice=0,reviewPulse=null,reviewToneTimers=[],reviewPending=new Set(),reviewQueueTimer=null;
+  let reviewSound=false,reviewAudio=null,reviewSeen=null,reviewLastNotice=0,reviewPulse=null,reviewToneTimers=[],reviewPending=new Set(),reviewQueueTimer=null,reviewRowPending=new Set(),reviewRowPlaying=new Set(),reviewRowTimer=null;
   const reviewToggle=$('swingReviewSound'),reviewNotice=$('swingReviewNotice');
   const clampReviewVolume=v=>Number.isFinite(Number(v))?Math.max(0,Math.min(400,Math.round(Number(v)))):100;
   const reviewVolumeKey='swing-review-volume-v1';
@@ -663,7 +664,16 @@
     try{const animation=el.animate([{opacity:0},{opacity:1},{opacity:0}],{duration:1400,iterations:4,easing:'ease-in-out'});animation.onfinish=animation.oncancel=()=>{el.remove();if(reviewPulse===el)reviewPulse=null;};return true;}catch{clearReviewPulse();return false;}
   }
   function paintReviewToggle(){reviewToggle.textContent=reviewSound?'提醒开':'提醒关';reviewToggle.setAttribute('aria-pressed',String(reviewSound));}
-  function clearReviewQueue(){if(reviewQueueTimer!==null)clearTimeout(reviewQueueTimer);reviewQueueTimer=null;reviewPending.clear()}
+  function paintReviewRows(){
+    for(const row of $('swingBody').querySelectorAll('[data-review-model]')){
+      const key=row.dataset.reviewModel,dir=row.dataset.reviewDirection,active=reviewSound&&(reviewRowPending.has(key)||reviewRowPlaying.has(key));
+      row.style.backgroundColor=active?(dir==='up'?'#dcf3e8':dir==='down'?'#fce3e6':''):'';
+      row.style.boxShadow=active?(dir==='up'?'inset 3px 0 #168568':dir==='down'?'inset 3px 0 #c43d48':''):'';
+    }
+  }
+  function clearReviewRows(){if(reviewRowTimer!==null)clearTimeout(reviewRowTimer);reviewRowTimer=null;reviewRowPending.clear();reviewRowPlaying.clear();paintReviewRows()}
+  function finishReviewRows(){reviewRowTimer=null;reviewRowPlaying.clear();paintReviewRows()}
+  function clearReviewQueue(){if(reviewQueueTimer!==null)clearTimeout(reviewQueueTimer);reviewQueueTimer=null;reviewPending.clear();clearReviewRows()}
   function resetReviewReminder(){hideReviewVolume();clearReviewQueue();clearReviewPulse();reviewSound=false;reviewSeen=null;reviewLastNotice=0;reviewNotice.hidden=true;reviewNotice.textContent='';paintReviewToggle()}
   reviewToggle.addEventListener('click',async()=>{
     if(reviewSound){clearReviewQueue();clearReviewPulse();reviewSound=false;reviewNotice.hidden=true;paintReviewToggle();return}
@@ -690,17 +700,26 @@
     reviewLastNotice=Date.now();
     reviewNotice.textContent='历史结果更新：'+[...reviewPending].join('、')+' · 已播放提醒 · 非下单提示';reviewNotice.hidden=false;
     reviewPending.clear();
-    if(showReviewPulse()){
+    reviewRowPlaying=new Set(reviewRowPending);reviewRowPending.clear();
+    if(reviewRowTimer!==null)clearTimeout(reviewRowTimer);
+    const pulses=showReviewPulse();
+    if(pulses){
       for(let i=1;i<4;i++)reviewToneTimers.push(setTimeout(()=>playReviewTone(),i*1400));
     }
+    paintReviewRows();
+    reviewRowTimer=setTimeout(finishReviewRows,pulses?4530:330);
   }
   function reviewCompleted(v){
     const latest=completedReviewStamp(v);
     if(latest===null)return;
-    const {next,changed}=compareCompletedReviews(reviewSeen,latest);
+    const previous=reviewSeen;
+    const {next,changed}=compareCompletedReviews(previous,latest);
     reviewSeen=next;
     if(!reviewSound||!swingDialog.open)return;
     for(const label of changed)reviewPending.add(label);
+    for(const [key,value] of Object.entries(latest)){
+      if(key.startsWith('short:')&&previous?.[key]&&value.at>previous[key].at)reviewRowPending.add(key.slice(6));
+    }
     queueReviewNotice();
   }
   function playReviewTone(preview=false){
