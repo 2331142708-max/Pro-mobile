@@ -1518,6 +1518,46 @@ function classicLiveView(symbol,now=Date.now()){
 }
 
 
+// Completed-candle retrospective study only. No active or pending trade indication.
+function trendBreakReview(raw,minutes,now){
+  const step=minutes*60000;
+  const bars=(Array.isArray(raw)?raw:[]).map(r=>({t:Number(r[0]),o:Number(r[1]),h:Number(r[2]),l:Number(r[3]),c:Number(r[4]),end:Number(r[6])+1})).filter(r=>[r.t,r.o,r.h,r.l,r.c,r.end].every(Number.isFinite)&&r.t%step===0&&r.end===r.t+step&&r.end<=now&&r.l>0&&r.h>=Math.max(r.o,r.c,r.l)&&r.l<=Math.min(r.o,r.c)).sort((x,y)=>x.t-y.t);
+  const contiguous=[];for(const bar of bars){if(contiguous.length&&bar.t!==contiguous.at(-1).t+step)contiguous.length=0;contiguous.push(bar)}
+  const rows=contiguous,latestAt=rows.at(-1)?.end||0;
+  if(rows.length<12||now-latestAt>step+30000)return {minutes,status:'等待连续已收盘K线',latestAt,n:0,same:0,opposite:0,flat:0,last:null};
+  const mean=(arr)=>arr.reduce((x,y)=>x+y,0)/arr.length;
+  function line(arr,field){const y=mean(arr.map(r=>r[field]));let top=0,bottom=0;for(let i=0;i<arr.length;i++){const dx=i-(arr.length-1)/2;top+=dx*(arr[i][field]-y);bottom+=dx*dx}const slope=top/bottom;return {slope,at:x=>y+slope*(x-(arr.length-1)/2)}}
+  let n=0,same=0,opposite=0,flat=0,last=null;
+  // The next candle must already have closed before a record is exposed.
+  for(let i=10;i<rows.length-1;i++){
+    const r=rows[i],p=rows[i-1],next=rows[i+1],prior=rows.slice(i-8,i),hi=line(prior,'h'),lo=line(prior,'l');
+    const ma5=mean(rows.slice(i-4,i+1).map(r=>r.c)),ma10=mean(rows.slice(i-9,i+1).map(r=>r.c));
+    const up=hi.slope<0&&p.c<=hi.at(7)&&r.c>hi.at(8)&&r.c>ma5&&ma5>ma10;
+    const down=lo.slope>0&&p.c>=lo.at(7)&&r.c<lo.at(8)&&r.c<ma5&&ma5<ma10;
+    if(up===down)continue;
+    const direction=up?'上破':'下破',change=100*(next.c/r.c-1)*(up?1:-1);
+    n++;if(change>.005)same++;else if(change<-.005)opposite++;else flat++;
+    last={direction,breakAt:r.end,reviewAt:next.end,change};
+  }
+  return {minutes,status:'滚动历史复核',latestAt,n,same,opposite,flat,last};
+}
+const trendReviewCache=new Map();
+let trendReviewBusy=false,trendReviewTimer=null;
+async function sampleTrendReview(){
+  if(stop||trendReviewBusy||!MARKETS.has('BTCUSDT'))return;
+  trendReviewBusy=true;
+  try{
+    await Promise.all([1,3].map(async minutes=>{
+      try{const raw=await json(BINANCE+'/fapi/v1/klines?symbol=BTCUSDT&interval='+minutes+'m&limit=150',7000);const t=Date.now();trendReviewCache.set(minutes,{...trendBreakReview(raw,minutes,t),fetchedAt:t});}
+      catch{const old=trendReviewCache.get(minutes);trendReviewCache.set(minutes,{...old,minutes,status:'接口暂不可用 · 上次复核',fetchedAt:old?.fetchedAt||0});}
+    }));
+  }finally{trendReviewBusy=false}
+}
+function trendReviewView(symbol,now=Date.now()){
+  if(symbol!=='BTCUSDT')return null;
+  return [1,3].map(minutes=>{const x=trendReviewCache.get(minutes);return x?{...x,status:now-x.fetchedAt>45000?'数据待更新 · 上次复核':x.status}:{minutes,status:'等待已收盘K线',n:0,same:0,opposite:0,flat:0,last:null}});
+}
+
 let shortBookBusy=false,shortBookTimer=null;
 async function sampleStudyBook(){
   if(stop||shortBookBusy||!MARKETS.has('BTCUSDT'))return;
@@ -1576,7 +1616,7 @@ const server=http.createServer((req,res)=>{
     const symbol=(url.searchParams.get('symbol')||'').toUpperCase();
     const m=MARKETS.get(symbol);if(!m)return reply(res,404,{error:'合约不可用'});
     if(!pro2Trades.watch(symbol))return reply(res,200,{version:'ssr-research-v1',symbol,ready:false,reason:'该合约暂无支持的公开主动成交流',periods:[]});
-    return reply(res,200,{...pro2Trades.getSwing(symbol),symbol,exchangeLabel:m.exchangeLabel,shortStudy:swingStudySummary(symbol,shortStudy),follow:swingFollow.snapshot(symbol),horizonAudit:symbol==='BTCUSDT'?horizonAudit.snapshot():null,closedLab:symbol==='BTCUSDT'?(()=>{const d=signalLab.snapshot();return {enabled:d.enabled,lossGuard:d.lossGuard,history:d.history.filter(x=>['tp','sl'].includes(x.reason)&&Number.isFinite(x.entry)&&Number.isFinite(x.exit)).slice(0,10).map(x=>({label:x.label,entry:x.entry,exit:x.exit,exitAt:x.exitAt,reason:x.reason,pnl:x.pnl,observedPnl:x.observedPnl}))}})():null});
+    return reply(res,200,{...pro2Trades.getSwing(symbol),symbol,exchangeLabel:m.exchangeLabel,shortStudy:swingStudySummary(symbol,shortStudy),trendReview:trendReviewView(symbol),follow:swingFollow.snapshot(symbol),horizonAudit:symbol==='BTCUSDT'?horizonAudit.snapshot():null,closedLab:symbol==='BTCUSDT'?(()=>{const d=signalLab.snapshot();return {enabled:d.enabled,lossGuard:d.lossGuard,history:d.history.filter(x=>['tp','sl'].includes(x.reason)&&Number.isFinite(x.entry)&&Number.isFinite(x.exit)).slice(0,10).map(x=>({label:x.label,entry:x.entry,exit:x.exit,exitAt:x.exitAt,reason:x.reason,pnl:x.pnl,observedPnl:x.observedPnl}))}})():null});
   }
   if(url.pathname==='/api/pro2/health')return reply(res,200,pro2.state());
   if(url.pathname==='/api/paper')return reply(res,200,paper.snapshot(Date.now()));
@@ -1600,7 +1640,7 @@ const server=http.createServer((req,res)=>{
   });
 });
 server.listen(PORT,'127.0.0.1',()=>{
-  pro2.start();pro2Trades.start();signalLab.flush();shortStudy.flush();swingFollow.flush();horizonAudit.flush();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
+  pro2.start();pro2Trades.start();signalLab.flush();shortStudy.flush();swingFollow.flush();horizonAudit.flush();trendReviewTimer=setInterval(sampleTrendReview,15000);trendReviewTimer.unref?.();void sampleTrendReview();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
   log(`合约实时数据Pro v9代 本地运行: http://localhost:${PORT}`);
   if(ENABLE_LEGACY)stopPatternFeed=startPatternFeed({markets:MARKETS,json,binance:BINANCE,okx:OKX,
     okxWs:OKX_WS,stopped:()=>stop,log});
@@ -1612,7 +1652,7 @@ server.listen(PORT,'127.0.0.1',()=>{
 });
 function shutdown(){stop=true;clearInterval(binanceTimer);clearInterval(okxTimer);
   clearTimeout(saveTimer);persistSignals();reviewHistory.save();paper.save();
-  clearInterval(signalLabTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();signalLab.flush();swingFollow.flush();horizonAudit.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
+  clearInterval(signalLabTimer);clearInterval(trendReviewTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();signalLab.flush();swingFollow.flush();horizonAudit.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
   state.wsB?.close();
   server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),2000).unref();
 }

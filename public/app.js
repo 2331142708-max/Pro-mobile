@@ -526,6 +526,13 @@
       }).join('');
       return '<tr data-review-model="'+esc(key)+'" data-review-direction="'+(last?.direction==='回升'?'up':last?.direction==='回落'?'down':'')+'"><th scope="row"><button type="button" data-swing-screen="models"><b>'+name+'</b><small>'+note+'</small></button></th>'+cells+'</tr>';
     }).join('');
+    const trendRows=(v.trendReview||[]).map(x=>{
+      const last=x.last,dir=last?.direction,tag=dir?historyTag(dir,dir==='上破'?'#168568':'#c43d48'):'—';
+      const outcome=last?(last.change>.005?'同向':last.change<-.005?'反向':'温和'):'—';
+      return '<tr><th scope="row">'+esc(x.minutes)+'分钟</th><td>'+tag+'</td><td>'+esc(outcome)+'</td><td>'+esc(x.same??0)+'/'+esc(x.n??0)+'</td></tr><tr><td colspan="4" style="text-align:left;font-size:10px;color:#64748b">'+esc(x.status)+' · '+(last?'历史突破 '+stampTrend(last.breakAt)+' · 复核 '+stampTrend(last.reviewAt):'暂无完成样本')+'</td></tr>';
+    }).join('');
+    function stampTrend(t){return Number.isFinite(t)?new Date(t).toLocaleTimeString('zh-CN',{hour12:false}):'—'}
+    const trendCard=v.trendReview?'<section class="sd-box"><div class="sd-section-title">均线＋趋势线突破 · 独立历史复核</div><div class="sd-foot">MA5 / MA10 · 前8根趋势线 · 下一根收盘后复核 · 最近150根K线滚动统计</div><table class="sd-table"><thead><tr><th>来源周期</th><th>历史突破</th><th>后续结果</th><th>同向/样本</th></tr></thead><tbody>'+trendRows+'</tbody></table></section>':'';
     const periods=[1,3,5].map(minutes=>{const r=v.periods?.find(x=>x.minutes===minutes),ok=v.ready&&r?.ready;
       return '<tr><th scope="row">'+minutes+'分</th><td>'+(ok?swingPct(r.change):'—')+'</td><td>'+(ok?swingPct(r.rebound):'—')+'</td><td>'+(ok?swingPct(r.pullback):'—')+'</td><td>'+(ok&&r.buyPct!=null?pct(r.buyPct):'—')+'</td></tr>';
     }).join('');
@@ -538,7 +545,7 @@
       '<div class="sd-state-grid"><button type="button" data-swing-screen="risk" class="sd-box sd-risk sd-risk-'+level+'"><small>已观测风险 ›</small><b>'+riskLabels[level]+'</b><small>'+ (riskNotes||'仅评估已观测项目')+'</small></button><button type="button" data-swing-screen="stage" class="sd-box sd-stage"><small>原SSR · 已发生阶段 ›</small><b>'+esc(stage)+'</b><small>前：未确认　中：'+(observed?'已观察':'未确认')+'　后：未确认</small></button></div>'+
       '<button type="button" class="sd-box sd-follow" data-swing-screen="follow"><span>60秒追踪 · '+esc(fLabels[f?.stage]||'等待数据')+'</span><b>'+(elapsed===null?'—':elapsed+'/60秒')+' ›</b></button>'+
       '<section class="sd-box sd-models"><button class="sd-section-title" type="button" data-swing-screen="models">六模型 · 2–5分钟历史复核 <span>详情 ›</span></button><div class="sd-foot">同向/完成笔数 · 小字为平均最大反向幅度 · 时间为60秒观察完成时刻</div><table class="sd-table"><thead><tr><th scope="col" style="width:43%">模型</th><th scope="col">2分</th><th scope="col">3分</th><th scope="col">4分</th><th scope="col">5分</th></tr></thead><tbody>'+models+'</tbody></table></section>'+
-      '<section class="sd-box sd-periods"><button class="sd-section-title" type="button" data-swing-screen="periods">1 / 3 / 5分钟已发生变化 <span>详情 ›</span></button><table class="sd-table"><thead><tr><th scope="col">周期</th><th scope="col">涨跌</th><th scope="col">回升</th><th scope="col">回落</th><th scope="col">主动买</th></tr></thead><tbody>'+periods+'</tbody></table></section>'+
+      trendCard+'<section class="sd-box sd-periods"><button class="sd-section-title" type="button" data-swing-screen="periods">1 / 3 / 5分钟已发生变化 <span>详情 ›</span></button><table class="sd-table"><thead><tr><th scope="col">周期</th><th scope="col">涨跌</th><th scope="col">回升</th><th scope="col">回落</th><th scope="col">主动买</th></tr></thead><tbody>'+periods+'</tbody></table></section>'+
       '<div class="sd-bottom"><span>只读研究 · 历史结果非交易信号</span><button type="button" data-swing-screen="history">历史区间 ›</button></div></div>';
   }
 
