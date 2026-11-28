@@ -385,17 +385,24 @@
   $('more').addEventListener('click',()=>{store.max+=100;renderMarkets()});
   $('markets').addEventListener('click',e=>{const pin=e.target.closest('[data-pin]');if(pin){e.stopPropagation();togglePin(pin.dataset.pin);return}
     const fav=e.target.closest('[data-fav]');if(fav){e.stopPropagation();toggleFavorite(fav.dataset.fav);return}
-    const item=e.target.closest('[data-row]');if(!item)return;const market=store.snap?.symbols?.find(x=>x.symbol===item.dataset.row);if(market?.quoteOnly){toast('合约详情正在接入，请稍后重试');return}store.symbol=item.dataset.row;store.lastDetail=0;renderMarkets();openClassicModal();void refreshDetail();
-    if(window.innerWidth<1050)$('detailSection').scrollIntoView({block:'start',behavior:'smooth'});
+    const item=e.target.closest('[data-row]');if(!item)return;const market=store.snap?.symbols?.find(x=>x.symbol===item.dataset.row);if(market?.quoteOnly){toast('合约详情正在接入，请稍后重试');return}store.symbol=item.dataset.row;store.lastDetail=0;renderMarkets();
+    openNewDetail();
+  
   });
   $('markets').addEventListener('keydown',e=>{if(e.target.closest('button'))return;if(e.key==='Enter'||e.key===' '){e.preventDefault();e.target.closest('[data-row]')?.click()}});
-  $('classicFullDetail').addEventListener('click',()=>{
+  function openNewDetail(){
     closeClassicModal();
     document.body.dataset.proView='detail';
     document.querySelectorAll('[data-pro-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.proTab==='market')));
+    if(store.detail?.symbol!==store.symbol){
+      $('detailTitle').textContent=store.symbol;
+      $('detailLabel').textContent='正在读取';
+      $('detailContent').textContent='正在读取合约详情…';
+    }else renderDetail();
     window.scrollTo(0,0);
     void refreshDetail();
-  });
+  }
+  $('detailBack').addEventListener('click',()=>document.querySelector('[data-pro-tab="market"]').click());
   $('classicClose').addEventListener('click',closeClassicModal);
   $('classicBackdrop').addEventListener('click',e=>{if(e.target===$('classicBackdrop'))closeClassicModal()});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&store.classicOpen)closeClassicModal()});

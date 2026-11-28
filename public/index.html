@@ -8,7 +8,13 @@
   <title>合约实时数据Pro v9</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css?v=pro4-classic-v9-five">
-  <script src="/app.js?v=pro-v9-four-nav" defer></script>
+  <style>
+body[data-pro-view="detail"] .hero,body[data-pro-view="detail"] .metric-grid,body[data-pro-view="detail"] .notice,body[data-pro-view="detail"] .market-panel,body[data-pro-view="detail"] .alert-panel,body[data-pro-view="detail"] .bottom-panels,body[data-pro-view="detail"] .pro-account,body[data-pro-view="detail"] .share-circle,body[data-pro-view="detail"] footer{display:none}
+body[data-pro-view="detail"] .work-grid{display:block}
+body[data-pro-view="detail"] .side{display:block;width:100%}
+body:not([data-pro-view="detail"]) #detailBack{display:none}
+</style>
+<script src="/app.js?v=pro-v9-new-detail-first" defer></script>
 
   <style id="wechat-layout-v1">
     :root{--bg:#ededed;--paper:#fff;--text:#171717;--muted:#666;--border:#e8e8e8;--blue:#3275c9;--green:#079657;--red:#d34a50;--shadow:none;--accent:#07a85b}
@@ -251,7 +257,7 @@
         <div class="list-foot">蓝色标记为置顶 · 精选是规则筛选结果，不代表必然上涨或下跌</div>
       </section>
       <aside class="side">
-        <section class="panel detail-panel" id="detailSection"><div class="panel-heading"><div><span class="section-label">CONTRACT DETAIL</span><h2 id="detailTitle">合约详细分析</h2></div><div class="detail-actions"><span class="pill" id="detailLabel">等待选择</span><button id="swingOpen" class="swing-open-button" type="button">波段回升回落</button><button id="classicOpen" class="classic-open-button" type="button">查看原版详情</button></div></div><div id="detailContent"><div class="empty detail-empty">选择左侧合约，查看 1H 已收盘K线、信号条件及大额成交监测。</div></div></section>
+        <section class="panel detail-panel" id="detailSection"><div class="panel-heading"><div><span class="section-label">CONTRACT DETAIL</span><h2 id="detailTitle">合约详细分析</h2></div><div class="detail-actions"><button type="button" id="detailBack" class="classic-open-button">返回行情</button><span class="pill" id="detailLabel">等待选择</span><button id="swingOpen" class="swing-open-button" type="button">波段回升回落</button><button id="classicOpen" class="classic-open-button" type="button">查看原版详情</button></div></div><div id="detailContent"><div class="empty detail-empty">选择左侧合约，查看 1H 已收盘K线、信号条件及大额成交监测。</div></div></section>
         <section class="panel alert-panel"><div class="panel-heading"><div><span class="section-label">SIGNAL TIMELINE</span><h2>最新形态记录</h2></div><span class="note-pill">历史样本不是胜率</span></div><div id="alerts" class="alerts"><div class="empty">尚无最新形态记录</div></div></section>
       </aside>
     </div>
@@ -307,7 +313,7 @@
 </script>
 <div id="classicBackdrop" class="classic-backdrop" hidden>
   <div class="classic-dialog" role="dialog" aria-modal="true" aria-labelledby="classicTitle">
-    <div class="classic-modal-header"><span id="classicTitle">合约详情 · 原版界面</span><button type="button" id="classicFullDetail" style="font-size:12px;width:auto;min-width:64px;white-space:nowrap;padding:0 8px" aria-label="打开完整合约详情">完整详情</button><button type="button" id="classicClose" aria-label="关闭合约详情">×</button></div>
+    <div class="classic-modal-header"><span id="classicTitle">合约详情 · 原版界面</span><button type="button" id="classicClose" aria-label="关闭合约详情">×</button></div>
     <div id="classicBody" class="classic-body"><div class="classic-loading">正在读取合约详情…</div></div>
   </div>
 </div>
