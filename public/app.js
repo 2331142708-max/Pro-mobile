@@ -57,6 +57,7 @@
   }
   function marketChangeText(m){return m.stale?(m.checked?'最近报价已核验 · 暂无新行情':'报价待更新'):m.change24h==null?'—':(m.change24h>=0?'+':'')+n(m.change24h)+'%'}
   function marketTradeText(m){const t=m.trade;return t?.ready?`100万${m.quoteAsset||'USDT'}聚合成交 买 ${amount(t.buy)} / 卖 ${amount(t.sell)}`:'大额成交：'+(t?.reason||'等待成交流');}
+  function quantSideText(q){return q.observedSide==='up'?'历史偏多':q.observedSide==='down'?'历史偏空':'方向未定'}
   function row(m){const pinned=store.pins.has(m.symbol),faved=store.favorites.has(m.symbol),name=m.displaySymbol||m.symbol;
     const tags=m.matches?.flatMap(h=>h.names.slice(0,3).map(x=>`<span class="tag ${cls(h.direction)}">${esc(x)}</span>`))||[];
     const signal=tags.length?tags.slice(0,4).join(''):'<span class="tag">'+(m.quoteOnly?'公开行情':m.ready?'未命中形态':'待1H数据')+'</span>';
@@ -68,7 +69,7 @@
         <button class="mini-btn star ${faved?'active':''}" data-fav="${esc(m.symbol)}" aria-label="${faved?'取消':'加入'}自选" title="${faved?'取消':'加入'}自选">${faved?'★':'☆'}</button>
         <button class="mini-btn ${pinned?'active':''}" data-pin="${esc(m.symbol)}" aria-label="${pinned?'取消蓝色置顶':'蓝色置顶'}" title="${pinned?'取消置顶':'置顶'}">${pinned?'◆':'◇'}</button>
         ${m.quant?.length?'<span class="tag blue">量化观察</span>':''}
-      </div><div class="row-meta"><span class="venue">${esc(m.exchangeLabel)}</span>${signal}</div>${m.quant?.length?'<div class="row-meta">'+m.quant.map(q=>'<span class="tag blue" title="'+esc(q.evidence)+' · '+tm(q.end)+'">'+esc(q.name)+' · '+tm(q.end)+'</span>').join('')+'</div>':''}
+      </div><div class="row-meta"><span class="venue">${esc(m.exchangeLabel)}</span>${signal}</div>${m.quant?.length?'<div class="row-meta">'+m.quant.map(q=>'<span class="tag '+cls(q.observedSide)+'" title="'+esc(q.evidence)+' · '+tm(q.end)+'">'+esc(q.name)+' · '+quantSideText(q)+' · '+tm(q.end)+'</span>').join('')+'</div>':''}
       <div class="market-sub">${m.ready?'1H收盘 '+tm(m.closedAt):esc(m.reason||'待真实K线')}${diff?' · '+esc(diff):''}</div>
       <div class="market-sub" data-market-trades>${esc(coverage)}</div></div>
       <div class="market-side"><div class="market-price">${price(m.price)}</div><div class="market-change ${m.stale?'':m.change24h>=0?'positive':'negative'}">${marketChangeText(m)}</div><div class="market-dir ${cls(m.direction)}">${m.quoteOnly?'仅行情':direction(m.direction)}</div></div>

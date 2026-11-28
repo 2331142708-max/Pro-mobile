@@ -1688,7 +1688,8 @@ const QUANT_NAMES={ofi:'F订单流失衡',absorb:'F大单吸收打法',cross:'F�
 const quantData=new Map(),quantBooks=new Map(),quantQuotes=new Map(),quantLiq=new Map(),quantRatios=new Map(),quantSockets=new Map();
 let quantTimer=null,quantRatioTimer=null,quantBusy=false,quantRatioBusy=false,quantRatioCursor=0,quantEnd=0;
 const qStep=300000;
-function quantTag(code,end,evidence){return {code,name:QUANT_NAMES[code],end,evidence}}
+function quantTag(code,end,evidence,observedSide='neutral'){return {code,name:QUANT_NAMES[code],end,evidence,observedSide:['up','down'].includes(observedSide)?observedSide:'neutral'}}
+function quantSide(value){return value>0?'up':value<0?'down':'neutral'}
 function quantBook(m,row,at){
   const bid=Number(row.bidPrice),ask=Number(row.askPrice),b=Number(row.bidQty),a=Number(row.askQty);
   if(!(bid>0&&ask>=bid&&b>=0&&a>=0&&b+a>0))return;
@@ -1701,14 +1702,14 @@ function quantBookReview(rows,end){
   for(let i=1;i<r.length;i++){const p=r[i-1],q=r[i];if(q.at-p.at>45000)continue;
     const scale=q.b+q.a+p.b+p.a;if(!scale)continue;
     sum+=((q.bid>=p.bid?q.b:0)-(q.bid<=p.bid?p.b:0)-(q.ask<=p.ask?q.a:0)+(q.ask>=p.ask?p.a:0))/scale;n++;}
-  return n>=8&&Math.abs(sum/n)>=.15?quantTag('ofi',end,'买一卖一历史快照净失衡，非全量挂撤单'):null;
+  return n>=8&&Math.abs(sum/n)>=.15?quantTag('ofi',end,'买一卖一历史快照净失衡，非全量挂撤单',quantSide(sum)):null;
 }
 function quantTapeReview(w){
   if(!w)return [];
   const tags=[],total=w.buy+w.sell,large=w.largeBuy+w.largeSell;
   if(!(total>0&&w.first>0&&w.last>0))return tags;
-  if(w.buyCount+w.sellCount>=100&&Math.abs(w.buy-w.sell)/total>=.35)tags.push(quantTag('cvd',w.end,'已结束5分钟主动成交额差占比异常（计价金额CVD）'));
-  if(large>0&&w.largeBuyCount+w.largeSellCount>=3&&large/total>=.15&&Math.abs(w.largeBuy-w.largeSell)/large>=.6&&Math.abs(w.last/w.first-1)<=.0005)tags.push(quantTag('absorb',w.end,'10万门槛聚合成交明显偏向但价格净位移较小；不能证明隐藏挂单'));
+  if(w.buyCount+w.sellCount>=100&&Math.abs(w.buy-w.sell)/total>=.35)tags.push(quantTag('cvd',w.end,'已结束5分钟主动成交额差占比异常（计价金额CVD）',quantSide(w.buy-w.sell)));
+  if(large>0&&w.largeBuyCount+w.largeSellCount>=3&&large/total>=.15&&Math.abs(w.largeBuy-w.largeSell)/large>=.6&&Math.abs(w.last/w.first-1)<=.0005)tags.push(quantTag('absorb',w.end,'10万门槛聚合成交明显偏向但价格净位移较小；不能证明隐藏挂单或推断后续方向','neutral'));
   return tags;
 }
 function quantQuoteSample(key,price,at){
@@ -1726,7 +1727,7 @@ function quantLink(m,end,code){
   if(m.exchange!=='binance'||m.contractType!=='PERPETUAL'||m.quoteAsset!=='USDT'||!m.apiSymbol.endsWith('USDT'))return null;
   const base=m.apiSymbol.slice(0,-4),own=quantMove('f:'+m.symbol,end),other=quantMove((code==='spot'?'s:':'x:')+base+'USDT',end);
   if(own===null||other===null||Math.abs(own)<.15||Math.abs(other)<.15||own*other<=0||Math.abs(own-other)>.2)return null;
-  return quantTag(code,end,code==='spot'?'币安现货及永续历史5分钟同向变化':'币安与OKX同标的USDT永续历史5分钟同向变化');
+  return quantTag(code,end,code==='spot'?'币安现货及永续历史5分钟同向变化':'币安与OKX同标的USDT永续历史5分钟同向变化',quantSide(own));
 }
 function connectQuantLiq(ex){
   if(stop||quantSockets.has(ex))return;
@@ -1739,9 +1740,9 @@ function connectQuantLiq(ex){
       const key=(ex==='coin'?'COIN:':'')+v.s,m=MARKETS.get(key),at=Number(v.T),qty=Number(v.z),px=Number(v.ap);
       if(!m||!(qty>0&&px>0&&at>0&&Math.abs(Date.now()-at)<90000))continue;
       const value=ex==='coin'?qty*m.contractSize:qty*px;
-      if(!(value>0))continue;
+      if(!(value>0)||!['BUY','SELL'].includes(v.S))continue;
       const r=quantLiq.get(key)||[],id=[at,v.S,qty,px].join(':');
-      if(r.some(x=>x.id===id))continue;r.push({id,at,value});
+      if(r.some(x=>x.id===id))continue;r.push({id,at,value,side:v.S});
       while(r.length&&(r[0].at<Date.now()-3*qStep||r.length>1000))r.shift();quantLiq.set(key,r);
     }
   }catch{}});
@@ -1758,7 +1759,7 @@ async function sampleQuantRatios(){
     if(!Array.isArray(data))return;
     const now=Date.now(),cut=Math.floor(now/qStep)*qStep-qStep;
     const valid=data.filter(x=>Number(x.timestamp)<=cut&&Number(x.timestamp)>cut-2*qStep&&Number(x.longShortRatio)>0).sort((a,b)=>Number(a.timestamp)-Number(b.timestamp)).at(-1);
-    if(valid){const r=Number(valid.longShortRatio),at=Number(valid.timestamp);quantRatios.set(m.symbol,{at,tag:r>=2||r<=.5?quantTag('ratio',at,'公开全市场账户多空比偏离均衡；非仓位金额或方向预测'):null})}
+    if(valid){const r=Number(valid.longShortRatio),at=Number(valid.timestamp);quantRatios.set(m.symbol,{at,tag:r>=2||r<=.5?quantTag('ratio',at,'公开全市场账户多空比偏离均衡；表示账户数量偏向，非仓位金额或方向预测',quantSide(r-1)):null})}
   }catch{}finally{quantRatioBusy=false}
 }
 async function sampleQuantHistory(){
@@ -1777,7 +1778,7 @@ async function sampleQuantHistory(){
       if(book)tags.push(book);
       for(const code of ['cross','spot']){const q=quantLink(m,end,code);if(q)tags.push(q)}
       const liq=(quantLiq.get(m.symbol)||[]).filter(x=>x.at>=end-qStep&&x.at<end);
-      if(liq.length&&liq.reduce((n,x)=>n+x.value,0)>=100000)tags.push(quantTag('liq',end,'公开清算订单快照累计达到10万计价单位；交易所推送可能漏报'));
+      if(liq.length&&liq.reduce((n,x)=>n+x.value,0)>=100000){const buy=liq.filter(x=>x.side==='BUY').reduce((n,x)=>n+x.value,0),sell=liq.filter(x=>x.side==='SELL').reduce((n,x)=>n+x.value,0);const side=buy+sell>0&&Math.abs(buy-sell)/(buy+sell)>=.35?quantSide(buy-sell):'neutral';tags.push(quantTag('liq',end,'历史公开清算买卖订单偏向；推送可能漏报，不预测后续方向',side));}
       quantData.set(m.symbol,tags);
     }
     for(const key of quantData.keys())if(!MARKETS.has(key)){quantData.delete(key);quantBooks.delete(key);quantLiq.delete(key);quantRatios.delete(key)}
