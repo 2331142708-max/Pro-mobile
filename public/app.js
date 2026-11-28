@@ -46,7 +46,6 @@
     if(store.filter==='favorite')return store.favorites.has(m.symbol);
     if(store.filter==='multi')return m.multi;
     if(store.filter==='selected')return !!m.quant?.length;
-    if(store.filter==='up'||store.filter==='down')return m.matches?.some(x=>x.direction===store.filter);
     return true;
   });
     const sort=(a,b)=>Number(store.pins.has(b.symbol))-Number(store.pins.has(a.symbol))||
