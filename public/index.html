@@ -8,7 +8,7 @@
   <title>合约实时数据Pro v9代 · 南柯一梦制作</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css?v=pro4-classic-v9-five">
-  <script src="/app.js?v=pro-v9-all-trades" defer></script>
+  <script src="/app.js?v=pro-v9-quant-history" defer></script>
 
   <style id="wechat-layout-v1">
     :root{--bg:#ededed;--paper:#fff;--text:#171717;--muted:#666;--border:#e8e8e8;--blue:#3275c9;--green:#079657;--red:#d34a50;--shadow:none;--accent:#07a85b}
@@ -244,7 +244,7 @@
       <section class="panel market-panel">
         <div class="panel-heading"><div><span class="section-label">REAL-TIME SCANNER</span><h2>合约行情</h2></div><div class="heading-side"><span id="resultsCount">—</span><span class="auto-dot"></span> 自动更新</div></div>
         <div class="toolbar"><label class="search"><span>⌕</span><input id="search" type="search" placeholder="搜索合约" autocomplete="off"></label><select id="exchange" aria-label="选择交易所"><option value="all">币安全部合约</option><option value="binance">币安 U 本位</option><option value="coin">币安 币本位</option></select></div>
-        <div class="tabs" id="tabs" role="tablist" aria-label="合约筛选"><button data-filter="all" class="active">全部</button><button data-filter="pinned">置顶 <span id="pinNum">0</span></button><button data-filter="favorite">自选 <span id="favNum">0</span></button><button data-filter="up">看多</button><button data-filter="down">看空</button><button data-filter="multi">多信号</button><button data-filter="selected">精选</button></div>
+        <div class="tabs" id="tabs" role="tablist" aria-label="合约筛选"><button data-filter="all" class="active">全部</button><button data-filter="pinned">置顶 <span id="pinNum">0</span></button><button data-filter="favorite">自选 <span id="favNum">0</span></button><button data-filter="up">看多</button><button data-filter="down">看空</button><button data-filter="multi">多信号</button><button data-filter="selected">量化信号 <span id="quantNum">0</span></button></div>
         <div class="list-title"><span>合约 / 形态 / 成交</span><span>价格 / 方向</span></div>
         <div id="markets" class="market-list"><div class="empty">正在获取真实行情…</div></div>
         <button id="more" class="more" hidden>加载更多合约</button>
@@ -255,7 +255,7 @@
         <section class="panel alert-panel"><div class="panel-heading"><div><span class="section-label">SIGNAL TIMELINE</span><h2>最新形态记录</h2></div><span class="note-pill">历史样本不是胜率</span></div><div id="alerts" class="alerts"><div class="empty">尚无最新形态记录</div></div></section>
       </aside>
     </div>
-    <section class="bottom-panels"><div class="panel method"><div class="panel-heading"><div><span class="section-label">RULE EXPLANATION</span><h2>当前筛选规则</h2></div></div><div class="rule-grid"><div><strong>01 / 周期确认</strong><p>从币安官方接口请求 1 小时历史K线，剔除未收盘数据，并校验连续性。</p></div><div><strong>02 / 形态判断</strong><p>识别锤子线、吞没、早晨之星及结构类形态；新的一根1H收盘前不确认下一条信号。</p></div><div><strong>03 / 精选复核</strong><p>要求同向多形态、实时价格与盘口较新、成交量足够、点差不过宽，避免延伸位置过远；不是预测保证。</p></div><div><strong>04 / 大额成交</strong><p>全部合约分组持续监测公开聚合成交，每条达到 100万计价币种单位（USDT 或 USDC） 才累计；整点清零，不能识别大户账户。</p></div></div></div>
+    <section class="bottom-panels"><div class="panel method"><div class="panel-heading"><div><span class="section-label">RULE EXPLANATION</span><h2>当前筛选规则</h2></div></div><div class="rule-grid"><div><strong>01 / 周期确认</strong><p>从币安官方接口请求 1 小时历史K线，剔除未收盘数据，并校验连续性。</p></div><div><strong>02 / 形态判断</strong><p>识别锤子线、吞没、早晨之星及结构类形态；新的一根1H收盘前不确认下一条信号。</p></div><div><strong>03 / F/E量化观察</strong><p>F订单流失衡、大单吸收打法、跨交易所联动、累计成交量差、爆仓清算打法；E多空账户比、现货合约联动、市场信息驱动（新闻源未接入）。仅标注已结束的历史观察及时间，非实时方向预测。跨市场仅限可匹配同标的；账户比轮询；缺失数据不打标签。</p></div><div><strong>04 / 大额成交</strong><p>全部合约分组持续监测公开聚合成交，每条达到 100万计价币种单位（USDT 或 USDC） 才累计；整点清零，不能识别大户账户。</p></div></div></div>
     <div class="panel verify"><div class="panel-heading"><div><span class="section-label">FORWARD TRACKING</span><h2>已观察信号验证</h2></div></div><div class="verify-flex"><div><span>下一根 1H K线方向一致</span><strong id="alignment">—</strong></div><div><span>已检查样本</span><strong id="sampleCount">0</strong></div><div><span>尚待检查</span><strong id="pendingCount">0</strong></div></div><p>统计基于启动后观察并持续记录的信号。样本量不足或未覆盖手续费、滑点时，不能当作真实交易成功率。</p></div></section>
 
 <section class="panel share-circle" id="shareCircle" aria-label="分享圈"><div class="circle-title"><h2>分享圈</h2><small>登录用户可见</small></div>

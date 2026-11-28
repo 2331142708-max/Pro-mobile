@@ -170,6 +170,6 @@ function createPro2Trades({markets,log=()=>{},stopped=()=>false,onTrade=()=>{}})
     for(const sym of symbols){const s=status(sym);if(s.connected)out.active++;if(s.ready)out.receiving++}
     return out;
   }
-  return {start(){if(timer)return;tick();timer=setInterval(tick,5000);timer.unref?.()},stop(){if(timer)clearInterval(timer);timer=null;for(const key of Object.keys(connections)){close(connections[key],'停止');connections[key]=null;}},watch,getStats,getMicro,getSwing,getLatestPrint,getMarketPulse,health,_test:{observe,tick,status,connections,desiredShards}};
+  return {start(){if(timer)return;tick();timer=setInterval(tick,5000);timer.unref?.()},stop(){if(timer)clearInterval(timer);timer=null;for(const key of Object.keys(connections)){close(connections[key],'停止');connections[key]=null;}},watch,getStats,getMicro,getSwing,getLatestPrint,getMarketPulse,historicalWindow:(symbol,end)=>observer.historicalWindow(symbol,end),health,_test:{observe,tick,status,connections,desiredShards}};
 }
 module.exports={createPro2Trades};

@@ -647,7 +647,7 @@ async function refreshBinanceBooks(){
       const list=await json(v.base+v.api+'/ticker/bookTicker',10000);
       if(!Array.isArray(list))return;
       for(const row of list){const m=MARKETS.get(v.prefix+row.symbol),at=safeNumber(row.time);
-        if(m&&at&&Math.abs(Date.now()-at)<30000)updateBook(m,row.bidPrice,row.askPrice,at);}
+        if(m&&at&&Math.abs(Date.now()-at)<30000){updateBook(m,row.bidPrice,row.askPrice,at);quantBook(m,row,at);}}
     }));
   }finally{booksPending=false;}
 }
@@ -1681,11 +1681,120 @@ async function refreshPublicCatalog(){
     }catch{publicCatalog.set(v.key,{...prev,error:true});}
   }));}finally{catalogBusy=false}
 }
+
+// F/E retrospective observations, not current direction or order instructions.
+// Each tag carries the historical interval and its public data evidence.
+const QUANT_NAMES={ofi:'F订单流失衡',absorb:'F大单吸收打法',cross:'F跨交易所联动',cvd:'F累计成交量差',liq:'F爆仓清算打法',ratio:'E多空账户比',spot:'E现货合约联动',news:'E市场信息驱动'};
+const quantData=new Map(),quantBooks=new Map(),quantQuotes=new Map(),quantLiq=new Map(),quantRatios=new Map(),quantSockets=new Map();
+let quantTimer=null,quantRatioTimer=null,quantBusy=false,quantRatioBusy=false,quantRatioCursor=0,quantEnd=0;
+const qStep=300000;
+function quantTag(code,end,evidence){return {code,name:QUANT_NAMES[code],end,evidence}}
+function quantBook(m,row,at){
+  const bid=Number(row.bidPrice),ask=Number(row.askPrice),b=Number(row.bidQty),a=Number(row.askQty);
+  if(!(bid>0&&ask>=bid&&b>=0&&a>=0&&b+a>0))return;
+  const prev=quantBooks.get(m.symbol)||[],last=prev.at(-1);
+  if(last&&at<=last.at)return;
+  prev.push({at,bid,ask,b,a});while(prev.length&&prev[0].at<at-3*qStep)prev.shift();quantBooks.set(m.symbol,prev);
+}
+function quantBookReview(rows,end){
+  const r=(rows||[]).filter(x=>x.at>=end-qStep&&x.at<end);let n=0,sum=0;
+  for(let i=1;i<r.length;i++){const p=r[i-1],q=r[i];if(q.at-p.at>45000)continue;
+    const scale=q.b+q.a+p.b+p.a;if(!scale)continue;
+    sum+=((q.bid>=p.bid?q.b:0)-(q.bid<=p.bid?p.b:0)-(q.ask<=p.ask?q.a:0)+(q.ask>=p.ask?p.a:0))/scale;n++;}
+  return n>=8&&Math.abs(sum/n)>=.15?quantTag('ofi',end,'买一卖一历史快照净失衡，非全量挂撤单'):null;
+}
+function quantTapeReview(w){
+  if(!w)return [];
+  const tags=[],total=w.buy+w.sell,large=w.largeBuy+w.largeSell;
+  if(!(total>0&&w.first>0&&w.last>0))return tags;
+  if(w.buyCount+w.sellCount>=100&&Math.abs(w.buy-w.sell)/total>=.35)tags.push(quantTag('cvd',w.end,'已结束5分钟主动成交额差占比异常（计价金额CVD）'));
+  if(large>0&&w.largeBuyCount+w.largeSellCount>=3&&large/total>=.15&&Math.abs(w.largeBuy-w.largeSell)/large>=.6&&Math.abs(w.last/w.first-1)<=.0005)tags.push(quantTag('absorb',w.end,'10万门槛聚合成交明显偏向但价格净位移较小；不能证明隐藏挂单'));
+  return tags;
+}
+function quantQuoteSample(key,price,at){
+  if(!(price>0&&Number.isFinite(at)&&at>0&&Math.abs(Date.now()-at)<90000))return;
+  const r=quantQuotes.get(key)||[];if(r.at(-1)?.at>=at)return;r.push({at,price});
+  while(r.length&&r[0].at<at-3*qStep)r.shift();quantQuotes.set(key,r);
+}
+function quantMove(key,end){
+  const rows=quantQuotes.get(key)||[],start=end-qStep;
+  const left=rows.filter(x=>x.at<=start).at(-1),right=rows.filter(x=>x.at<=end).at(-1);
+  if(!left||!right||start-left.at>75000||end-right.at>75000||right.at<=left.at)return null;
+  return 100*(right.price/left.price-1);
+}
+function quantLink(m,end,code){
+  if(m.exchange!=='binance'||m.contractType!=='PERPETUAL'||m.quoteAsset!=='USDT'||!m.apiSymbol.endsWith('USDT'))return null;
+  const base=m.apiSymbol.slice(0,-4),own=quantMove('f:'+m.symbol,end),other=quantMove((code==='spot'?'s:':'x:')+base+'USDT',end);
+  if(own===null||other===null||Math.abs(own)<.15||Math.abs(other)<.15||own*other<=0||Math.abs(own-other)>.2)return null;
+  return quantTag(code,end,code==='spot'?'币安现货及永续历史5分钟同向变化':'币安与OKX同标的USDT永续历史5分钟同向变化');
+}
+function connectQuantLiq(ex){
+  if(stop||quantSockets.has(ex))return;
+  let ws;try{ws=new WebSocket(ex==='coin'?'wss://dstream.binance.com/ws/!forceOrder@arr':'wss://fstream.binance.com/market/ws/!forceOrder@arr')}catch{return}
+  quantSockets.set(ex,ws);
+  ws.addEventListener('message',event=>{if(stop||quantSockets.get(ex)!==ws)return;try{
+    const data=JSON.parse(String(event.data)),d=data.data||data;
+    for(const item of Array.isArray(d)?d:[d]){
+      const v=item?.o;if(item?.e!=='forceOrder'||!v)continue;
+      const key=(ex==='coin'?'COIN:':'')+v.s,m=MARKETS.get(key),at=Number(v.T),qty=Number(v.z),px=Number(v.ap);
+      if(!m||!(qty>0&&px>0&&at>0&&Math.abs(Date.now()-at)<90000))continue;
+      const value=ex==='coin'?qty*m.contractSize:qty*px;
+      if(!(value>0))continue;
+      const r=quantLiq.get(key)||[],id=[at,v.S,qty,px].join(':');
+      if(r.some(x=>x.id===id))continue;r.push({id,at,value});
+      while(r.length&&(r[0].at<Date.now()-3*qStep||r.length>1000))r.shift();quantLiq.set(key,r);
+    }
+  }catch{}});
+  ws.addEventListener('error',()=>{try{ws.close()}catch{}});
+  ws.addEventListener('close',()=>{if(quantSockets.get(ex)===ws)quantSockets.delete(ex)});
+}
+async function sampleQuantRatios(){
+  if(stop||quantRatioBusy)return;quantRatioBusy=true;
+  try{
+    const list=[...MARKETS.values()].filter(m=>m.exchange==='binance'&&m.contractType==='PERPETUAL').sort((a,b)=>a.symbol.localeCompare(b.symbol));
+    if(!list.length)return;
+    const m=list[quantRatioCursor++%list.length];
+    const data=await json(BINANCE+'/futures/data/globalLongShortAccountRatio?symbol='+encodeURIComponent(m.apiSymbol)+'&period=5m&limit=4',6000);
+    if(!Array.isArray(data))return;
+    const now=Date.now(),cut=Math.floor(now/qStep)*qStep-qStep;
+    const valid=data.filter(x=>Number(x.timestamp)<=cut&&Number(x.timestamp)>cut-2*qStep&&Number(x.longShortRatio)>0).sort((a,b)=>Number(a.timestamp)-Number(b.timestamp)).at(-1);
+    if(valid){const r=Number(valid.longShortRatio),at=Number(valid.timestamp);quantRatios.set(m.symbol,{at,tag:r>=2||r<=.5?quantTag('ratio',at,'公开全市场账户多空比偏离均衡；非仓位金额或方向预测'):null})}
+  }catch{}finally{quantRatioBusy=false}
+}
+async function sampleQuantHistory(){
+  if(stop||quantBusy)return;quantBusy=true;
+  try{
+    connectQuantLiq('binance');connectQuantLiq('coin');
+    for(const m of MARKETS.values())if(m.exchange==='binance')quantQuoteSample('f:'+m.symbol,m.price,m.priceAt);
+    await Promise.allSettled([
+      json('https://api.binance.com/api/v3/ticker/24hr',8000).then(rows=>{if(Array.isArray(rows))for(const x of rows)if(x.symbol?.endsWith('USDT'))quantQuoteSample('s:'+x.symbol,Number(x.lastPrice),Number(x.closeTime))}),
+      json(OKX+'/api/v5/market/tickers?instType=SWAP',8000).then(res=>{if(Array.isArray(res?.data))for(const x of res.data)if(x.instId?.endsWith('-USDT-SWAP'))quantQuoteSample('x:'+x.instId.replace('-USDT-SWAP','USDT'),Number(x.last),Number(x.ts))})
+    ]);
+    const end=Math.floor(Date.now()/qStep)*qStep-qStep;
+    if(end===quantEnd)return;quantEnd=end;
+    for(const m of MARKETS.values()){
+      const tags=quantTapeReview(pro2Trades.historicalWindow(m.symbol,end)),book=quantBookReview(quantBooks.get(m.symbol),end);
+      if(book)tags.push(book);
+      for(const code of ['cross','spot']){const q=quantLink(m,end,code);if(q)tags.push(q)}
+      const liq=(quantLiq.get(m.symbol)||[]).filter(x=>x.at>=end-qStep&&x.at<end);
+      if(liq.length&&liq.reduce((n,x)=>n+x.value,0)>=100000)tags.push(quantTag('liq',end,'公开清算订单快照累计达到10万计价单位；交易所推送可能漏报'));
+      quantData.set(m.symbol,tags);
+    }
+    for(const key of quantData.keys())if(!MARKETS.has(key)){quantData.delete(key);quantBooks.delete(key);quantLiq.delete(key);quantRatios.delete(key)}
+  }finally{quantBusy=false}
+}
+function quantFor(symbol,now=Date.now()){
+  const tags=(quantData.get(symbol)||[]).filter(t=>now-t.end<=2*qStep+90000&&t.end<=now-qStep);
+  const ratio=quantRatios.get(symbol);
+  if(ratio?.tag&&now-ratio.at<=45*60000)tags.push(ratio.tag);
+  return tags;
+}
+
 function publicQuoteRows(now=Date.now()){
   return [...MARKETS.values()].map(m=>({symbol:m.symbol,price:m.price,priceAt:m.priceAt,change24h:m.change24h,stale:!(m.price>0&&m.priceAt>0&&Math.abs(now-m.priceAt)<60000),checked:!!(m.quoteCheckedAt&&now-m.quoteCheckedAt<45000),trade:pro2Trades.getStats(m.symbol),quoteVolume24h:m.quoteVolume24h}));
 }
 function fullMarketSnapshot(core,now=Date.now()){
-  const rows=new Map(core.symbols.map(x=>[x.symbol,{...x,checked:!!(MARKETS.get(x.symbol)?.quoteCheckedAt&&now-MARKETS.get(x.symbol).quoteCheckedAt<45000)}]));
+  const rows=new Map(core.symbols.map(x=>[x.symbol,{...x,quant:quantFor(x.symbol,now),checked:!!(MARKETS.get(x.symbol)?.quoteCheckedAt&&now-MARKETS.get(x.symbol).quoteCheckedAt<45000)}]));
   for(const v of catalogVenues){const cache=publicCatalog.get(v.key);for(const x of cache?.rows||[]){if(!rows.has(x.symbol))rows.set(x.symbol,{...x,stale:!!x.stale||now-x.priceAt>45000||now-(cache?.at||0)>45000});}}
   return {...core,symbols:[...rows.values()],catalog:{count:rows.size,researchCount:core.counts.eligible,venues:catalogVenues.map(v=>({label:v.label,count:publicCatalog.get(v.key)?.rows?.length||0,at:publicCatalog.get(v.key)?.at||0,error:!!publicCatalog.get(v.key)?.error}))}};
 }
@@ -1708,7 +1817,7 @@ const server=http.createServer((req,res)=>{
     const symbol=(url.searchParams.get('symbol')||'').toUpperCase();
     // Public, read-only detail requests activate a bounded temporary trade stream.
     pro2Trades.watch(symbol);
-    const value=pro2.detail(symbol,pro2Trades);return reply(res,value?200:404,value||{error:'合约不可用'});
+    const value=pro2.detail(symbol,pro2Trades);return reply(res,value?200:404,value?{...value,quant:quantFor(symbol)}:{error:'合约不可用'});
   }
   if(url.pathname==='/api/pro2/classic-live'){
     const symbol=(url.searchParams.get('symbol')||'').toUpperCase();
@@ -1748,7 +1857,7 @@ const server=http.createServer((req,res)=>{
   });
 });
 server.listen(PORT,'127.0.0.1',()=>{
-  pro2.start();pro2Trades.start();connectBinanceWS();void refreshPublicCatalog();catalogTimer=setInterval(refreshPublicCatalog,15000);catalogTimer.unref?.();alignedStudy.flush();shortStudy.flush();swingFollow.flush();horizonAudit.flush();trendReviewTimer=setInterval(sampleTrendReview,15000);trendReviewTimer.unref?.();void sampleTrendReview();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
+  pro2.start();pro2Trades.start();connectBinanceWS();quantTimer=setInterval(()=>void sampleQuantHistory(),60000);quantTimer.unref?.();quantRatioTimer=setInterval(()=>void sampleQuantRatios(),3000);quantRatioTimer.unref?.();void sampleQuantHistory();void refreshPublicCatalog();catalogTimer=setInterval(refreshPublicCatalog,15000);catalogTimer.unref?.();alignedStudy.flush();shortStudy.flush();swingFollow.flush();horizonAudit.flush();trendReviewTimer=setInterval(sampleTrendReview,15000);trendReviewTimer.unref?.();void sampleTrendReview();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
   log(`合约实时数据Pro v9代 本地运行: http://localhost:${PORT}`);
   if(ENABLE_LEGACY)stopPatternFeed=startPatternFeed({markets:MARKETS,json,binance:BINANCE,okx:OKX,
     okxWs:OKX_WS,stopped:()=>stop,log});
@@ -1760,7 +1869,7 @@ server.listen(PORT,'127.0.0.1',()=>{
 });
 function shutdown(){stop=true;clearInterval(binanceTimer);clearInterval(okxTimer);
   clearTimeout(saveTimer);persistSignals();reviewHistory.save();paper.save();
-  clearInterval(signalLabTimer);clearInterval(catalogTimer);clearInterval(trendReviewTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();alignedStudy.flush();swingFollow.flush();horizonAudit.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
+  clearInterval(quantTimer);clearInterval(quantRatioTimer);for(const ws of quantSockets.values())try{ws.close()}catch{};clearInterval(signalLabTimer);clearInterval(catalogTimer);clearInterval(trendReviewTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();alignedStudy.flush();swingFollow.flush();horizonAudit.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
   for(const ctx of quoteStreams.values())try{ctx.ws.close()}catch{}
   server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),2000).unref();
 }

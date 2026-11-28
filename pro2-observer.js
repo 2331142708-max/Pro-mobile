@@ -117,7 +117,14 @@ function createObserver({markets,now=Date.now}){
       sentiment:market,btc10m:btc?.change??null,eth10m:eth?.change??null,updatedAt:time,
       note:'仅覆盖已订阅且持续有行情的合约；规则强度不是涨跌概率'};
   }
+  function historicalWindow(symbol,end){
+    const h=histories.get(symbol),start=end-300000;
+    if(!h||h.startedAt>start||h.latestAt<end||end>now()-300000)return null;
+    const rows=h.buckets.filter(b=>b.t>=start&&b.t<end);
+    if(rows.length<30||rows[0].t-start>30000||end-rows.at(-1).t>30000||rows.some((b,i)=>i&&b.t-rows[i-1].t>30000))return null;
+    const v=summary(h,start,end);return {...v,first:rows[0].open,last:rows.at(-1).close,end};
+  }
   function reset(symbol){histories.delete(symbol);checkRecords.delete(symbol)}
-  return {record,reset,stats,marketPulse,swing:symbol=>swingView(histories.get(symbol),now()),_test:{summary,change,histories}};
+  return {record,reset,stats,marketPulse,historicalWindow,swing:symbol=>swingView(histories.get(symbol),now()),_test:{summary,change,histories}};
 }
 module.exports={createObserver};

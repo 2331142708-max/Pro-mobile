@@ -46,12 +46,12 @@
     if(store.filter==='pinned')return store.pins.has(m.symbol);
     if(store.filter==='favorite')return store.favorites.has(m.symbol);
     if(store.filter==='multi')return m.multi;
-    if(store.filter==='selected')return m.selected;
+    if(store.filter==='selected')return !!m.quant?.length;
     if(store.filter==='up'||store.filter==='down')return m.matches?.some(x=>x.direction===store.filter);
     return true;
   });
     const sort=(a,b)=>Number(store.pins.has(b.symbol))-Number(store.pins.has(a.symbol))||
-      Number(b.selected)-Number(a.selected)||Number(b.ready)-Number(a.ready)||
+      (store.filter==='selected'?(b.quant?.length||0)-(a.quant?.length||0):Number(b.selected)-Number(a.selected))||Number(b.ready)-Number(a.ready)||
       Number(b.multi)-Number(a.multi)||(b.quoteVolume24h||0)-(a.quoteVolume24h||0);
     return list.sort(sort);
   }
@@ -67,18 +67,18 @@
       <div class="market-row-main"><div class="market-name-line"><strong class="sym">${esc(name)}</strong>
         <button class="mini-btn star ${faved?'active':''}" data-fav="${esc(m.symbol)}" aria-label="${faved?'取消':'加入'}自选" title="${faved?'取消':'加入'}自选">${faved?'★':'☆'}</button>
         <button class="mini-btn ${pinned?'active':''}" data-pin="${esc(m.symbol)}" aria-label="${pinned?'取消蓝色置顶':'蓝色置顶'}" title="${pinned?'取消置顶':'置顶'}">${pinned?'◆':'◇'}</button>
-        ${m.selected?'<span class="tag blue">精选</span>':''}
-      </div><div class="row-meta"><span class="venue">${esc(m.exchangeLabel)}</span>${signal}</div>
+        ${m.quant?.length?'<span class="tag blue">量化观察</span>':''}
+      </div><div class="row-meta"><span class="venue">${esc(m.exchangeLabel)}</span>${signal}</div>${m.quant?.length?'<div class="row-meta">'+m.quant.map(q=>'<span class="tag blue" title="'+esc(q.evidence)+' · '+tm(q.end)+'">'+esc(q.name)+' · '+tm(q.end)+'</span>').join('')+'</div>':''}
       <div class="market-sub">${m.ready?'1H收盘 '+tm(m.closedAt):esc(m.reason||'待真实K线')}${diff?' · '+esc(diff):''}</div>
       <div class="market-sub" data-market-trades>${esc(coverage)}</div></div>
       <div class="market-side"><div class="market-price">${price(m.price)}</div><div class="market-change ${m.stale?'':m.change24h>=0?'positive':'negative'}">${marketChangeText(m)}</div><div class="market-dir ${cls(m.direction)}">${m.quoteOnly?'仅行情':direction(m.direction)}</div></div>
     </article>`;
   }
   function renderMarkets(){const all=activeRows(),shown=all.slice(0,store.max);
-    $('resultsCount').textContent=all.length+' 个结果';$('pinNum').textContent=store.pins.size;$('favNum').textContent=store.favorites.size;
+    $('resultsCount').textContent=all.length+' 个结果';const qn=$('quantNum');if(qn)qn.textContent=(store.snap?.symbols||[]).filter(m=>m.quant?.length).length;$('pinNum').textContent=store.pins.size;$('favNum').textContent=store.favorites.size;
     $('more').hidden=all.length<=store.max;$('more').textContent=`加载更多 · ${shown.length}/${all.length}`;
     $('markets').innerHTML=shown.length?shown.map(row).join(''):
-      `<div class="empty">${store.filter==='pinned'?'没有置顶合约，点击任一合约旁的◇即可置顶。':store.filter==='favorite'?'自选为空，请在全部合约旁点击☆。':store.filter==='selected'?'暂时没有符合多形态、盘口与成交量条件的精选合约。':store.filter==='all'&&!store.snap?.symbols?.length?'正在加载真实合约目录…':'没有符合筛选条件的合约；这不表示一定不会涨跌。'}</div>`;
+      `<div class="empty">${store.filter==='pinned'?'没有置顶合约，点击任一合约旁的◇即可置顶。':store.filter==='favorite'?'自选为空，请在全部合约旁点击☆。':store.filter==='selected'?'暂无符合条件的已结束量化观察；等待真实数据积累。':store.filter==='all'&&!store.snap?.symbols?.length?'正在加载真实合约目录…':'没有符合筛选条件的合约；这不表示一定不会涨跌。'}</div>`;
   }
   function renderAlerts(){const alerts=store.snap?.alerts||[];
     $('alerts').innerHTML=alerts.length?alerts.slice(0,15).map(a=>`<div class="alert-item"><span class="tag ${cls(a.direction)}">${direction(a.direction)}</span><strong>${esc(a.displaySymbol||a.symbol)}</strong><span>${(a.names||[]).map(esc).join('、')}</span><small>1H 收盘 ${tm(a.closedAt)} · 观测 ${tm(a.observedAt)} · ${a.result?('下一根1H变动 '+n(a.result.change,2)+'%'):'下一根1H结果待检查'}</small></div>`).join(''):
