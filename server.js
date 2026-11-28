@@ -1684,10 +1684,11 @@ async function refreshPublicCatalog(){
 
 // F/E retrospective observations, not current direction or order instructions.
 // Each tag carries the historical interval and its public data evidence.
-const QUANT_NAMES={ofi:'F订单流失衡',absorb:'F大单吸收打法',cross:'F跨交易所联动',cvd:'F累计成交量差',liq:'F爆仓清算打法',ratio:'E多空账户比',spot:'E现货合约联动',news:'E市场信息驱动'};
+const QUANT_NAMES={ofi:'F订单流失衡',absorb:'F大单吸收打法',cross:'F跨交易所联动',cvd:'F累计成交量差',liq:'F爆仓清算打法',ratio:'E多空账户比',spot:'E现货合约联动',news:'E市场信息驱动',depth:'m盘口深度失衡',oi:'m持仓量（OI）',large:'m大额成交',speed:'m成交速度',funding:'m资金费率'};
 const quantData=new Map(),quantBooks=new Map(),quantQuotes=new Map(),quantLiq=new Map(),quantRatios=new Map(),quantSockets=new Map();
 let quantTimer=null,quantRatioTimer=null,quantBusy=false,quantRatioBusy=false,quantRatioCursor=0,quantEnd=0;
 const qStep=300000;
+const quantExtra=new Map(),quantFunding=new Map();let quantExtraTimer=null,quantExtraBusy=false,quantExtraCursor=0;
 function quantTag(code,end,evidence,observedSide='neutral'){return {code,name:QUANT_NAMES[code],end,evidence,observedSide:['up','down'].includes(observedSide)?observedSide:'neutral'}}
 function quantSide(value){return value>0?'up':value<0?'down':'neutral'}
 function quantBook(m,row,at){
@@ -1712,6 +1713,64 @@ function quantTapeReview(w){
   if(large>0&&w.largeBuyCount+w.largeSellCount>=3&&large/total>=.15&&Math.abs(w.largeBuy-w.largeSell)/large>=.6&&Math.abs(w.last/w.first-1)<=.0005)tags.push(quantTag('absorb',w.end,'10万门槛聚合成交明显偏向但价格净位移较小；不能证明隐藏挂单或推断后续方向','neutral'));
   return tags;
 }
+
+function quantDepthReview(book,end){
+  const sum=levels=>{if(!Array.isArray(levels)||levels.length<10)return null;let total=0;for(const x of levels.slice(0,20)){const p=Number(x[0]),q=Number(x[1]);if(!(p>0&&q>=0&&Number.isFinite(p)&&Number.isFinite(q)))return null;total+=q;}return total;};
+  const bid=sum(book?.bids),ask=sum(book?.asks);
+  if(bid===null||ask===null||!(bid+ask>0)||!(Number(book.bids[0][0])<Number(book.asks[0][0])))return null;
+  const imbalance=(bid-ask)/(bid+ask);
+  return Math.abs(imbalance)>=.4?quantTag('depth',end,'公开前20档挂单数量失衡；单次快照，非成交或真实意图',quantSide(imbalance)):null;
+}
+function quantOIReview(rows,end){
+  if(!Array.isArray(rows))return null;
+  const valid=rows.map(x=>({at:Number(x.timestamp),oi:Number(x.sumOpenInterest)})).filter(x=>x.at>0&&x.at<=end&&x.oi>0&&Number.isFinite(x.oi)).sort((a,b)=>a.at-b.at);
+  const last=valid.at(-1),prev=valid.at(-2);
+  if(!last||!prev||last.at-prev.at!==qStep||end-last.at>qStep)return null;
+  const pct=100*(last.oi/prev.oi-1);
+  return Math.abs(pct)>=2?quantTag('oi',last.at,'已发布5分钟持仓量变化 '+pct.toFixed(2)+'%；总持仓变化不区分多空','neutral'):null;
+}
+function quantExtraTape(w,prior){
+  if(!w)return [];
+  const tags=[],large=w.largeBuy+w.largeSell;
+  if(large>0&&w.largeBuyCount+w.largeSellCount>=3&&Math.abs(w.largeBuy-w.largeSell)/large>=.5)
+    tags.push(quantTag('large',w.end,'历史10万计价单位以上聚合成交偏向；不能识别大户身份',quantSide(w.largeBuy-w.largeSell)));
+  const n=w.buyCount+w.sellCount,p=prior?prior.buyCount+prior.sellCount:0;
+  if(prior&&p>=100&&n>=200&&n/p>=2)tags.push(quantTag('speed',w.end,'已结束5分钟聚合成交笔数为前5分钟的 '+(n/p).toFixed(2)+' 倍；非逐笔原始成交','neutral'));
+  return tags;
+}
+async function sampleQuantExtra(){
+  if(stop||quantExtraBusy)return;quantExtraBusy=true;
+  try{
+    const list=[...MARKETS.values()].filter(m=>m.exchange==='binance'||m.exchange==='coin').sort((a,b)=>a.symbol.localeCompare(b.symbol));
+    if(!list.length)return;
+    const m=list[quantExtraCursor++%list.length],base=m.exchange==='coin'?'https://dapi.binance.com':BINANCE,api=m.exchange==='coin'?'/dapi/v1':'/fapi/v1';
+    const end=Math.floor(Date.now()/qStep)*qStep-qStep;
+    const tasks=[json(base+api+'/depth?symbol='+encodeURIComponent(m.apiSymbol)+'&limit=20',6000)];
+    if(m.exchange==='binance')tasks.push(json(BINANCE+'/futures/data/openInterestHist?symbol='+encodeURIComponent(m.apiSymbol)+'&period=5m&limit=5',6000));
+    const results=await Promise.allSettled(tasks),old=quantExtra.get(m.symbol)||{},next={...old};
+    if(results[0]?.status==='fulfilled'){
+      const row=results[0].value,at=Number(row.T||row.E);
+      if(at>0&&Math.abs(Date.now()-at)<60000)next.depth={at,tag:quantDepthReview(row,at)};
+    }
+    if(results[1]?.status==='fulfilled'){const tag=quantOIReview(results[1].value,end);next.oi={at:tag?.end||end,tag}}
+    quantExtra.set(m.symbol,next);
+  }catch{}finally{quantExtraBusy=false}
+}
+async function sampleQuantFunding(){
+  await Promise.allSettled(catalogVenues.map(async v=>{
+    const rows=await json(v.base+v.api+'/premiumIndex',6000);if(!Array.isArray(rows))return;
+    const now=Date.now();
+    for(const x of rows){
+      const key=v.prefix+x.symbol,m=MARKETS.get(key),at=Number(x.time),rate=Number(x.lastFundingRate);
+      if(!m||m.contractType!=='PERPETUAL'||!Number.isFinite(rate)||!(at>0&&Math.abs(now-at)<90000))continue;
+      const old=quantFunding.get(key)||[];
+      if(old.at(-1)?.at>=at)continue;
+      old.push({at,tag:Math.abs(rate)>=.0005?quantTag('funding',at,'公开资金费率快照 '+(rate*100).toFixed(4)+'%；不推断价格方向','neutral'):null});
+      while(old.length&&old[0].at<now-900000)old.shift();quantFunding.set(key,old);
+    }
+  }));
+}
+
 function quantQuoteSample(key,price,at){
   if(!(price>0&&Number.isFinite(at)&&at>0&&Math.abs(Date.now()-at)<90000))return;
   const r=quantQuotes.get(key)||[];if(r.at(-1)?.at>=at)return;r.push({at,price});
@@ -1768,26 +1827,31 @@ async function sampleQuantHistory(){
     connectQuantLiq('binance');connectQuantLiq('coin');
     for(const m of MARKETS.values())if(m.exchange==='binance')quantQuoteSample('f:'+m.symbol,m.price,m.priceAt);
     await Promise.allSettled([
+      sampleQuantFunding(),
       json('https://api.binance.com/api/v3/ticker/24hr',8000).then(rows=>{if(Array.isArray(rows))for(const x of rows)if(x.symbol?.endsWith('USDT'))quantQuoteSample('s:'+x.symbol,Number(x.lastPrice),Number(x.closeTime))}),
       json(OKX+'/api/v5/market/tickers?instType=SWAP',8000).then(res=>{if(Array.isArray(res?.data))for(const x of res.data)if(x.instId?.endsWith('-USDT-SWAP'))quantQuoteSample('x:'+x.instId.replace('-USDT-SWAP','USDT'),Number(x.last),Number(x.ts))})
     ]);
     const end=Math.floor(Date.now()/qStep)*qStep-qStep;
     if(end===quantEnd)return;quantEnd=end;
     for(const m of MARKETS.values()){
-      const tags=quantTapeReview(pro2Trades.historicalWindow(m.symbol,end)),book=quantBookReview(quantBooks.get(m.symbol),end);
+      const w=pro2Trades.historicalWindow(m.symbol,end),prior=pro2Trades.historicalWindow(m.symbol,end-qStep);
+      const tags=[...quantTapeReview(w),...quantExtraTape(w,prior)],book=quantBookReview(quantBooks.get(m.symbol),end);
       if(book)tags.push(book);
       for(const code of ['cross','spot']){const q=quantLink(m,end,code);if(q)tags.push(q)}
       const liq=(quantLiq.get(m.symbol)||[]).filter(x=>x.at>=end-qStep&&x.at<end);
       if(liq.length&&liq.reduce((n,x)=>n+x.value,0)>=100000){const buy=liq.filter(x=>x.side==='BUY').reduce((n,x)=>n+x.value,0),sell=liq.filter(x=>x.side==='SELL').reduce((n,x)=>n+x.value,0);const side=buy+sell>0&&Math.abs(buy-sell)/(buy+sell)>=.35?quantSide(buy-sell):'neutral';tags.push(quantTag('liq',end,'历史公开清算买卖订单偏向；推送可能漏报，不预测后续方向',side));}
       quantData.set(m.symbol,tags);
     }
-    for(const key of quantData.keys())if(!MARKETS.has(key)){quantData.delete(key);quantBooks.delete(key);quantLiq.delete(key);quantRatios.delete(key)}
+    for(const key of quantData.keys())if(!MARKETS.has(key)){quantData.delete(key);quantBooks.delete(key);quantLiq.delete(key);quantRatios.delete(key);quantExtra.delete(key);quantFunding.delete(key)}
   }finally{quantBusy=false}
 }
 function quantFor(symbol,now=Date.now()){
   const tags=(quantData.get(symbol)||[]).filter(t=>now-t.end<=2*qStep+90000&&t.end<=now-qStep);
   const ratio=quantRatios.get(symbol);
   if(ratio?.tag&&now-ratio.at<=45*60000)tags.push(ratio.tag);
+  const extra=quantExtra.get(symbol)||{};
+  for(const code of ['depth','oi']){const v=extra[code];if(v?.tag&&now-v.at>=qStep&&now-v.at<=45*60000)tags.push(v.tag);}
+  const fund=(quantFunding.get(symbol)||[]).filter(x=>x.at<=now-qStep).at(-1);if(fund?.tag&&now-fund.at<=2*qStep+90000)tags.push(fund.tag);
   return tags;
 }
 
@@ -1858,7 +1922,7 @@ const server=http.createServer((req,res)=>{
   });
 });
 server.listen(PORT,'127.0.0.1',()=>{
-  pro2.start();pro2Trades.start();connectBinanceWS();quantTimer=setInterval(()=>void sampleQuantHistory(),60000);quantTimer.unref?.();quantRatioTimer=setInterval(()=>void sampleQuantRatios(),3000);quantRatioTimer.unref?.();void sampleQuantHistory();void refreshPublicCatalog();catalogTimer=setInterval(refreshPublicCatalog,15000);catalogTimer.unref?.();alignedStudy.flush();shortStudy.flush();swingFollow.flush();horizonAudit.flush();trendReviewTimer=setInterval(sampleTrendReview,15000);trendReviewTimer.unref?.();void sampleTrendReview();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
+  pro2.start();pro2Trades.start();connectBinanceWS();quantTimer=setInterval(()=>void sampleQuantHistory(),60000);quantTimer.unref?.();quantRatioTimer=setInterval(()=>void sampleQuantRatios(),3000);quantRatioTimer.unref?.();quantExtraTimer=setInterval(()=>void sampleQuantExtra(),3000);quantExtraTimer.unref?.();void sampleQuantHistory();void refreshPublicCatalog();catalogTimer=setInterval(refreshPublicCatalog,15000);catalogTimer.unref?.();alignedStudy.flush();shortStudy.flush();swingFollow.flush();horizonAudit.flush();trendReviewTimer=setInterval(sampleTrendReview,15000);trendReviewTimer.unref?.();void sampleTrendReview();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
   log(`合约实时数据Pro v9代 本地运行: http://localhost:${PORT}`);
   if(ENABLE_LEGACY)stopPatternFeed=startPatternFeed({markets:MARKETS,json,binance:BINANCE,okx:OKX,
     okxWs:OKX_WS,stopped:()=>stop,log});
@@ -1870,7 +1934,7 @@ server.listen(PORT,'127.0.0.1',()=>{
 });
 function shutdown(){stop=true;clearInterval(binanceTimer);clearInterval(okxTimer);
   clearTimeout(saveTimer);persistSignals();reviewHistory.save();paper.save();
-  clearInterval(quantTimer);clearInterval(quantRatioTimer);for(const ws of quantSockets.values())try{ws.close()}catch{};clearInterval(signalLabTimer);clearInterval(catalogTimer);clearInterval(trendReviewTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();alignedStudy.flush();swingFollow.flush();horizonAudit.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
+  clearInterval(quantTimer);clearInterval(quantRatioTimer);clearInterval(quantExtraTimer);for(const ws of quantSockets.values())try{ws.close()}catch{};clearInterval(signalLabTimer);clearInterval(catalogTimer);clearInterval(trendReviewTimer);clearInterval(shortBookTimer);savePresence(true);shortStudy.flush();alignedStudy.flush();swingFollow.flush();horizonAudit.flush();stopPatternFeed?.();pro2.stop();pro2Trades.stop();
   for(const ctx of quoteStreams.values())try{ctx.ws.close()}catch{}
   server.close(()=>process.exit(0));setTimeout(()=>process.exit(0),2000).unref();
 }
