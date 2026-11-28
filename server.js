@@ -1923,7 +1923,10 @@ const server=http.createServer((req,res)=>{
   if(simRoute(req,res,url))return;
   if(req.method!=='GET')return reply(res,405,{error:'只允许GET；无交易/下单API'});
   if(url.pathname==='/api/ui-error'){log('PRO_FRONTEND_ERROR '+(url.searchParams.get('message')||'unknown').slice(0,200));return reply(res,200,{ok:true})}
-  if(url.pathname==='/api/pro2/signal-lab')return reply(res,200,alignedStudy.snapshot());
+  if(url.pathname==='/api/pro2/signal-lab'){
+    if(!isAdmin(currentUser(req)))return reply(res,403,{error:'实时模拟未开放'});
+    return reply(res,200,alignedStudy.snapshot());
+  }
   if(url.pathname==='/api/pro2/snapshot')return reply(res,200,fullMarketSnapshot(pro2.snapshot(pro2Trades)));
   if(url.pathname==='/api/pro2/quotes')return reply(res,200,{serverAt:Date.now(),rows:publicQuoteRows()});
   if(url.pathname==='/api/pro2/flow-health')return reply(res,200,pro2Trades.health());
@@ -1950,7 +1953,10 @@ const server=http.createServer((req,res)=>{
     return reply(res,200,{...pro2Trades.getSwing(symbol),symbol,exchangeLabel:m.exchangeLabel,shortStudy:swingStudySummary(symbol,shortStudy),trendReview:trendReviewView(symbol),follow:swingFollow.snapshot(symbol),horizonAudit:symbol==='BTCUSDT'?horizonAudit.snapshot():null,closedLab:null});
   }
   if(url.pathname==='/api/pro2/health')return reply(res,200,pro2.state());
-  if(url.pathname==='/api/paper')return reply(res,200,paper.snapshot(Date.now()));
+  if(url.pathname==='/api/paper'){
+    if(!isAdmin(currentUser(req)))return reply(res,403,{error:'实时模拟未开放'});
+    return reply(res,200,paper.snapshot(Date.now()));
+  }
   if(url.pathname==='/api/snapshot')return reply(res,200,currentSnapshot());
   if(url.pathname==='/api/detail'){
     const symbol=(url.searchParams.get('symbol')||'').toUpperCase();
