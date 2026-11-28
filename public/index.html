@@ -8,7 +8,7 @@
   <title>合约实时数据Pro v9</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/style.css?v=pro4-classic-v9-five">
-  <script src="/app.js?v=pro-v9-compact-tabs" defer></script>
+  <script src="/app.js?v=pro-v9-four-nav" defer></script>
 
   <style id="wechat-layout-v1">
     :root{--bg:#ededed;--paper:#fff;--text:#171717;--muted:#666;--border:#e8e8e8;--blue:#3275c9;--green:#079657;--red:#d34a50;--shadow:none;--accent:#07a85b}
@@ -105,7 +105,7 @@
 
 <style id="share-circle-style">
 .share-circle{margin-top:12px;padding-bottom:8px}.circle-title{display:flex;justify-content:space-between;align-items:center;padding:16px;border-bottom:1px solid #eee}.circle-title h2{margin:0;font-size:19px}.circle-title small{font-size:12px;color:#777}.circle-compose{padding:16px;border-bottom:8px solid #ededed}.circle-compose textarea{width:100%;display:block;min-height:112px;resize:vertical;background:#f7f7f7;border:0;border-radius:6px;padding:12px;font:inherit;color:#222;line-height:1.6}.circle-actions{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px}.circle-upload{position:relative;display:inline-flex;align-items:center;gap:6px;background:#f1f1f1;border-radius:5px;padding:11px;color:#555;font-size:13px;cursor:pointer}.circle-upload input{position:absolute;width:1px;height:1px;opacity:0}.circle-upload:focus-within{outline:2px solid #07a85b}.circle-submit{background:#07a85b;border:0;color:white;border-radius:5px;padding:11px 24px;font-size:14px;font-weight:700}.circle-status{color:#666;font-size:12px;line-height:1.5;margin:8px 0 0;min-height:1.4em}.circle-images,.circle-previews{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;max-width:400px;margin-top:10px}.circle-images:empty,.circle-previews:empty{display:none}.circle-photo,.circle-preview{position:relative;aspect-ratio:1;min-width:0;overflow:hidden;border:0;padding:0;background:#efefef;border-radius:3px}.circle-photo img,.circle-preview img{display:block;width:100%;height:100%;object-fit:cover}.circle-preview button{position:absolute;top:3px;right:3px;background:#111c;color:white;border:0;border-radius:50%;width:26px;height:26px;font-size:19px;line-height:1}.circle-post{display:grid;grid-template-columns:40px minmax(0,1fr);gap:12px;padding:18px 16px;border-bottom:1px solid #eee}.circle-avatar{display:grid;place-items:center;width:40px;height:40px;background:#07a85b;color:white;border-radius:7px;font-size:19px;font-weight:700}.circle-author{color:#426184;font-size:15px;font-weight:700}.circle-text{white-space:pre-wrap;overflow-wrap:anywhere;color:#222;font-size:15px;line-height:1.65;margin:7px 0 0}.circle-meta{display:flex;justify-content:space-between;align-items:center;gap:12px;color:#888;font-size:12px;margin-top:12px}.circle-delete{background:transparent;border:0;color:#777;font-size:12px;padding:5px}.circle-load{display:block;margin:12px auto;border:0;background:#f0f0f0;color:#555;padding:9px 18px;border-radius:5px}.circle-load[hidden]{display:none}.circle-empty{padding:30px 18px;text-align:center;color:#777;font-size:13px}.circle-viewer{border:0;background:#161616;color:#fff;max-width:96vw;max-height:92dvh;overflow:auto;border-radius:6px;padding:0}.circle-viewer::backdrop{background:#000b}.circle-viewer img{display:block;max-width:94vw;max-height:83dvh;object-fit:contain;margin:auto}.circle-viewer button{display:block;margin:8px auto;background:#444;color:#fff;border:0;border-radius:4px;padding:8px 18px}
-@media(max-width:710px){.pro-nav{grid-template-columns:repeat(5,minmax(0,1fr))}.share-circle{margin-top:0}body:not([data-pro-view="circle"]) .share-circle{display:none}body[data-pro-view="circle"] .hero,body[data-pro-view="circle"] .metric-grid,body[data-pro-view="circle"] .notice,body[data-pro-view="circle"] .work-grid,body[data-pro-view="circle"] .bottom-panels,body[data-pro-view="circle"] .pro-account,body[data-pro-view="circle"] footer{display:none}.circle-compose textarea{font-size:16px}.circle-post{padding:16px 14px;gap:10px}}
+@media(max-width:710px){.pro-nav{grid-template-columns:repeat(4,minmax(0,1fr))}.share-circle{margin-top:0}body:not([data-pro-view="circle"]) .share-circle{display:none}body[data-pro-view="circle"] .hero,body[data-pro-view="circle"] .metric-grid,body[data-pro-view="circle"] .notice,body[data-pro-view="circle"] .work-grid,body[data-pro-view="circle"] .bottom-panels,body[data-pro-view="circle"] .pro-account,body[data-pro-view="circle"] footer{display:none}.circle-compose textarea{font-size:16px}.circle-post{padding:16px 14px;gap:10px}}
 </style>
 
 <style id="pro-me-style">
@@ -289,7 +289,6 @@
 
 <nav class="pro-nav" aria-label="页面导航">
   <button type="button" data-pro-tab="market" aria-pressed="true"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="m6 16 4-5 4 3 4-7"/></svg>行情</button>
-  <button type="button" data-pro-tab="detail" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>详情</button>
   <button type="button" data-pro-tab="records" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l4 2"/></svg>实时模拟</button>
   <button type="button" data-pro-tab="circle" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a8 8 0 0 1-8 8 9 9 0 0 1-3.5-.7L4 20l1.2-4A8 8 0 1 1 20 11.5Z"/><path d="M9 12h.01M12 12h.01M15 12h.01"/></svg>分享圈</button>
   <button type="button" data-pro-tab="more" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>我</button>
@@ -308,7 +307,7 @@
 </script>
 <div id="classicBackdrop" class="classic-backdrop" hidden>
   <div class="classic-dialog" role="dialog" aria-modal="true" aria-labelledby="classicTitle">
-    <div class="classic-modal-header"><span id="classicTitle">合约详情 · 原版界面</span><button type="button" id="classicClose" aria-label="关闭合约详情">×</button></div>
+    <div class="classic-modal-header"><span id="classicTitle">合约详情 · 原版界面</span><button type="button" id="classicFullDetail" style="font-size:12px;width:auto;min-width:64px;white-space:nowrap;padding:0 8px" aria-label="打开完整合约详情">完整详情</button><button type="button" id="classicClose" aria-label="关闭合约详情">×</button></div>
     <div id="classicBody" class="classic-body"><div class="classic-loading">正在读取合约详情…</div></div>
   </div>
 </div>

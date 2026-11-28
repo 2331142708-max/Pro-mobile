@@ -389,6 +389,13 @@
     if(window.innerWidth<1050)$('detailSection').scrollIntoView({block:'start',behavior:'smooth'});
   });
   $('markets').addEventListener('keydown',e=>{if(e.target.closest('button'))return;if(e.key==='Enter'||e.key===' '){e.preventDefault();e.target.closest('[data-row]')?.click()}});
+  $('classicFullDetail').addEventListener('click',()=>{
+    closeClassicModal();
+    document.body.dataset.proView='detail';
+    document.querySelectorAll('[data-pro-tab]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.proTab==='market')));
+    window.scrollTo(0,0);
+    void refreshDetail();
+  });
   $('classicClose').addEventListener('click',closeClassicModal);
   $('classicBackdrop').addEventListener('click',e=>{if(e.target===$('classicBackdrop'))closeClassicModal()});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&store.classicOpen)closeClassicModal()});
