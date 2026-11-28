@@ -478,7 +478,7 @@
 
   function swingClosedLab(v){
     const d=v.closedLab,guard=d?.lossGuard;
-    if(!d)return '<section class="swing-card"><h3>模拟阈值 · 历史复核</h3><p>旧短线模拟已归档；请在实时模拟页查看1小时反向研究报表。</p></section>';
+    if(!d)return '<section class="swing-card"><h3>模拟阈值 · 历史复核</h3><p>旧短线模拟已归档；请在实时模拟页查看1小时同向研究报表。</p></section>';
     const signed=x=>Number.isFinite(x)?(x>0?'+':'')+x.toFixed(2)+' U':'—';
     const stamp=t=>Number.isFinite(t)?new Date(t).toLocaleTimeString('zh-CN',{hour12:false}):'—';
     const rows=(d.history||[]).map(x=>'<div class="swing-closed-row"><div><b>'+esc(x.label)+'</b><small>'+stamp(x.exitAt)+' · 已完成 · '+(x.reason==='tp'?'历史正阈值触及':'历史负阈值触及')+'</small></div><div class="swing-closed-prices"><span>历史参考价<strong>'+price(x.entry)+'</strong></span><span>实际结束价<strong>'+price(x.exit)+'</strong></span><span>观测理论结果<strong>'+signed(x.observedPnl)+'</strong></span></div></div>').join('');

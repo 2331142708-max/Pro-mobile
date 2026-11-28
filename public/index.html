@@ -192,11 +192,11 @@
 
 
 
-<section id="signalLabPanel" class="signal-lab" aria-label="1小时形态反向研究">
-  <div class="lab-heading"><h2>实时模拟 · 1小时形态反向研究</h2><button type="button" class="lab-return" id="signalLabReturn">返回行情</button></div>
-  <div class="lab-header"><strong>每合约独立虚拟本金 1,000 U · 单样本 100 U · 假设125× · 正阈值20 U</strong><p>原看多形态作反向下跌假设，原看空形态作反向上涨假设。使用观察后首根完整1H K线开盘作研究参考，不追溯使用观察前价格。同一合约最多一个样本；相反形态同时出现则跳过。不设主动止损，保证金耗尽按100 U理论损失；同根同时触及两阈值按保守失败。累计净亏损500 U停止新增。尚未结算样本不显示当前价格或方向。</p><p>归一化U单位，仅理论研究；不等于实际强平、成交或收益，未计手续费、滑点及资金费率。结算时间为收盘复核时间，不是精确触价时刻。</p><div id="signalLabStatus" class="lab-status" role="status">等待接口…</div><p id="signalLabStarted" class="lab-open"></p></div>
+<section id="signalLabPanel" class="signal-lab" aria-label="1小时形态同向研究">
+  <div class="lab-heading"><h2>实时模拟 · 1小时形态同向研究</h2><button type="button" class="lab-return" id="signalLabReturn">返回行情</button></div>
+  <div class="lab-header"><strong>每合约独立虚拟本金 1,000 U · 单样本 100 U · 假设125× · 止盈45 U · 止损20 U</strong><p>原看多形态作同向上涨假设，原看空形态作同向下跌假设。使用观察后首根完整1H K线开盘作研究参考，不追溯使用观察前价格。同一合约最多一个样本；相反形态同时出现则跳过。按固定阈值计算理论盈亏 +45 U / −20 U；同根同时触及两阈值按保守止损。保留500 U累计理论亏损上限，并预留未结算样本的理论止损额度，避免并行样本突破该上限。尚未结算样本不显示当前价格或方向。</p><p>固定阈值结算不模拟跳空或成交偏差，实际亏损可能更大。归一化U单位，仅理论研究；不等于实际强平、成交或收益，未计手续费、滑点及资金费率。结算时间为收盘复核时间，不是精确触价时刻。</p><div id="signalLabStatus" class="lab-status" role="status">等待接口…</div><p id="signalLabStarted" class="lab-open"></p></div>
   <h3>汇总结果</h3><div id="signalLabCards" class="lab-cards"></div>
-  <details><summary>各合约独立账本</summary><div class="lab-table"><table><thead><tr><th>合约</th><th>理论余额 U</th><th>正阈值/耗尽</th><th>回撤 U</th></tr></thead><tbody id="reverseAccounts"></tbody></table></div></details>
+  <details><summary>各合约独立账本</summary><div class="lab-table"><table><thead><tr><th>合约</th><th>理论余额 U</th><th>止盈/止损</th><th>回撤 U</th></tr></thead><tbody id="reverseAccounts"></tbody></table></div></details>
   <h3>已完成样本报表</h3><p>最近100条。持有时长以已收盘K线复核，小时内实际触及时间未知。</p><div class="lab-table"><table><thead><tr><th>合约</th><th>原形态</th><th>参考开仓时间</th><th>复核结束时间</th><th>持续时长</th><th>结果</th><th>理论盈亏 U</th></tr></thead><tbody id="signalLabRows"></tbody></table></div>
 </section>
 <section class="practice-paused" id="practicePaused" aria-label="暂停服务"><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="20"/><path d="M20 16v16M28 16v16" stroke-linecap="round" stroke-width="3"/></svg><h2>暂停服务</h2><p>请返回其他界面</p><button type="button" id="practiceReturn">返回行情</button></section>
@@ -928,17 +928,17 @@ const active=()=>document.visibilityState==='visible'&&document.body.dataset.pro
 function render(d){
   status.textContent=!d.enabled?'研究暂停：'+d.error:d.stoppedAt?'累计理论净亏损达到500 U · 停止新增样本':'正在逐小时采集已收盘K线';
   $('signalLabStarted').textContent='研究开始：'+stamp(d.startedAt)+' · 数据读取：'+stamp(d.serverAt);
-  const metrics=[['已建立账本',d.accountCount],['待完成样本',d.active],['累计理论盈亏',money(d.total.net)+' U'],['正阈值触及',d.total.wins],['保证金耗尽',d.total.exhausted],['同根顺序不明',d.total.ambiguous],['作废 / 跳过',d.total.invalid+' / '+d.total.skipped]];
+  const metrics=[['已建立账本',d.accountCount],['待完成样本',d.active],['累计理论盈亏',money(d.total.net)+' U'],['止盈次数',d.total.wins],['止损次数',d.total.losses],['理论胜率',d.total.wins+d.total.losses?money(100*d.total.wins/(d.total.wins+d.total.losses))+'%':'暂无样本'],['同根顺序不明',d.total.ambiguous],['作废 / 跳过',d.total.invalid+' / '+d.total.skipped]];
   cards.replaceChildren(...metrics.map(([k,v])=>{const box=el('section');box.className='lab-card';const value=el('div',String(v));value.className='lab-balance';box.append(el('h4',k),value);return box}));
   const row=values=>{const tr=el('tr');for(const v of values)tr.append(el('td',String(v)));return tr};
-  $('reverseAccounts').replaceChildren(...d.accounts.map(a=>row([a.label,money(a.balance),a.wins+' / '+a.exhausted,money(a.drawdown)])));
-  const names={tp:'正阈值触及',exhausted:'理论保证金耗尽',ambiguous:'同根顺序不明 · 保守失败',gap:'缺失K线 · 作废'};
+  $('reverseAccounts').replaceChildren(...d.accounts.map(a=>row([a.label,money(a.balance),a.wins+' / '+a.losses,money(a.drawdown)])));
+  const names={tp:'理论止盈',sl:'理论止损',ambiguous:'同根顺序不明 · 保守止损',gap:'缺失K线 · 作废'};
   rows.replaceChildren(...d.history.map(r=>row([r.label,(r.names||[]).join('、'),stamp(r.entryAt),stamp(r.exitAt),Number.isFinite(r.durationMs)?(r.durationMs/3600000).toFixed(1)+'小时':'—',names[r.reason]||r.reason,money(r.pnl)])));
   if(!d.history.length){const tr=el('tr'),td=el('td','暂无已完成样本');td.colSpan=7;tr.append(td);rows.append(tr)}
 }
 async function refresh(){
   if(!active()||busy)return;busy=true;
-  try{const r=await fetch('/api/pro2/signal-lab',{cache:'no-store',credentials:'same-origin'});if(r.status===401){location.replace('/login');return}if(!r.ok)throw Error('接口暂不可用');const d=await r.json();if(d.version!=='reverse-1h-review-v1')throw Error('等待新版本');render(d)}
+  try{const r=await fetch('/api/pro2/signal-lab',{cache:'no-store',credentials:'same-origin'});if(r.status===401){location.replace('/login');return}if(!r.ok)throw Error('接口暂不可用');const d=await r.json();if(d.version!=='aligned-1h-review-v1')throw Error('等待新版本');render(d)}
   catch{status.textContent='接口暂不可用或等待新版本；已有内容为上次结果。'}finally{busy=false}
 }
 $('signalLabReturn').onclick=()=>document.querySelector('[data-pro-tab="market"]').click();
