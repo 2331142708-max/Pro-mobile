@@ -790,6 +790,7 @@ const crypto=require('node:crypto');
 const ACCESS_FILE=path.join(dataPath,'.pro-access-code');
 const ACCOUNTS=path.join(dataPath,'accounts-v1');
 const SESSION_TTL=12*60*60*1000;
+const SESSION_FILE=path.join(dataPath,'remembered-sessions-v1.json');
 const sessions=new Map();
 const USER_RE=/^[a-z0-9_]{3,24}$/;
 let failures=[],pendingLogins=0;
@@ -848,7 +849,7 @@ function rememberedAccount(req){
 }
 function loginPage(res,message='',status=200,register=false,remembered=''){
   const saved=USER_RE.test(remembered)?remembered:'';
-  const remember=register?'':'<label class="remember"><input type="checkbox" name="remember" value="1" '+(saved?'checked':'')+'>记住账号密码（保持登录7天）</label><p class="remember-note">密码由浏览器密码管理器保存，仅在自己的设备上勾选。</p>';
+  const remember=register?'':'<label class="remember"><input type="checkbox" name="remember" value="1" '+(saved?'checked':'')+'>记住登录（7天免输密码）</label><p class="remember-note">仅在自己的设备上勾选；登录后7天内重启网站仍可恢复会话。退出登录、修改密码或被管理员撤销后需重新登录。密码自动填充由浏览器管理。</p>';
   const fields=register?'<label for="nickname">昵称</label><input id="nickname" name="nickname" required maxlength="24" autocomplete="nickname" placeholder="分享圈显示的名字">':'';
   const invite=register?'<label for="invite">注册邀请码</label><input id="invite" name="invite" type="password" required maxlength="128" autocomplete="off" placeholder="原网站登录码">':'';
   const confirm=register?'<label for="confirm">确认密码</label><input id="confirm" name="confirm" type="password" required minlength="4" maxlength="128" autocomplete="new-password">':'';
@@ -860,18 +861,65 @@ function cookieOptions(req){
   const secure=req.socket.encrypted||req.headers['x-forwarded-proto']==='https';
   return '; Path=/; HttpOnly; SameSite=Strict'+(secure?'; Secure':'');
 }
-function sessionToken(req){return /(?:^|;\s*)pro_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie||'')?.[1]}
+
+// Only remembered sessions survive restart. Store a one-way digest of each
+// random cookie, never the password or the cookie itself.
+function persistRememberedSessions(){
+  const now=Date.now(),rows=[];
+  for(const [key,v] of sessions){
+    if(!v.remember||v.until<=now)continue;
+    rows.push([key,{until:v.until,remember:true,user:v.user,credentialVersion:v.credentialVersion,
+      quickLocked:!!v.quickLocked,quickHash:v.quickHash||null,quickFailures:v.quickFailures||0}]);
+  }
+  const tmp=SESSION_FILE+'.tmp';
+  try{
+    fs.mkdirSync(dataPath,{recursive:true,mode:0o700});
+    fs.writeFileSync(tmp,JSON.stringify({version:1,rows}),{mode:0o600});
+    fs.renameSync(tmp,SESSION_FILE);return true;
+  }catch(e){
+    // Fail closed rather than restoring a previously revoked token on restart.
+    try{fs.unlinkSync(SESSION_FILE)}catch{}
+    try{fs.unlinkSync(tmp)}catch{}
+    log('REMEMBER_SESSION_SAVE_FAILED '+String(e.code||'internal'));
+    return false;
+  }
+}
+function deleteSession(key){
+  const v=sessions.get(key);if(!v)return false;
+  sessions.delete(key);if(v.remember)persistRememberedSessions();return true;
+}
+function restoreRememberedSessions(){
+  try{
+    const doc=JSON.parse(fs.readFileSync(SESSION_FILE,'utf8')),now=Date.now();
+    if(doc.version!==1||!Array.isArray(doc.rows))throw Error('invalid session file');
+    for(const [key,v] of doc.rows.slice(-256)){
+      if(!/^[a-f0-9]{64}$/.test(key)||v?.remember!==true||!Number.isSafeInteger(v.until)||v.until<=now||v.until>now+7*86400000||!USER_RE.test(v.user?.username||''))continue;
+      const account=readAccount(v.user.username);
+      if(!account||remainingRestriction(account,now)||digest(account.hash).toString('hex')!==v.credentialVersion)continue;
+      // Preserve locks and their failure count. Never restore a malformed lock as unlocked.
+      if(v.quickLocked&&!/^[a-f0-9]{64}$/.test(v.quickHash||''))continue;
+      if((v.quickFailures||0)>=3)continue;
+      sessions.set(key,{until:v.until,remember:true,user:{username:account.username,nickname:account.nickname},credentialVersion:v.credentialVersion,
+        quickLocked:!!v.quickLocked,quickHash:/^[a-f0-9]{64}$/.test(v.quickHash||'')?v.quickHash:undefined,quickFailures:Number.isInteger(v.quickFailures)&&v.quickFailures>=0?v.quickFailures:0});
+    }
+    persistRememberedSessions();
+  }catch(e){if(e.code!=='ENOENT')log('REMEMBER_SESSION_RESTORE_FAILED');}
+}
+
+function sessionToken(req){const raw=/(?:^|;\s*)pro_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie||'')?.[1];return raw?digest(raw).toString('hex'):undefined}
 function currentUser(req){
   const token=sessionToken(req),session=token&&sessions.get(token);
   if(!session||session.until<=Date.now()||!session.user||session.quickLocked)return null;
   return session.user;
 }
 function startSession(req,res,user,remember=false){
-  if(sessions.size>=256)sessions.delete(sessions.keys().next().value);
-  const token=sessionToken(req);if(token)sessions.delete(token);
+  if(sessions.size>=256)deleteSession(sessions.keys().next().value);
+  const token=sessionToken(req);if(token)deleteSession(token);
   const t=crypto.randomBytes(32).toString('hex');
   const seconds=remember?7*86400:SESSION_TTL/1000;
-  sessions.set(t,{until:Date.now()+seconds*1000,user:{username:user.username,nickname:user.nickname}});
+  const key=digest(t).toString('hex');
+  sessions.set(key,{until:Date.now()+seconds*1000,remember:!!remember,credentialVersion:digest(user.hash).toString('hex'),user:{username:user.username,nickname:user.nickname}});
+  if(remember)persistRememberedSessions();
   const cookies=['pro_session='+t+cookieOptions(req)+'; Max-Age='+seconds,'pro_remember_user='+(remember?user.username:'')+cookieOptions(req)+'; Max-Age='+(remember?30*86400:0)];
   res.writeHead(303,{'Location':'/','Cache-Control':'no-store','Set-Cookie':cookies});res.end();
 }
@@ -907,10 +955,10 @@ function quickDeviceRoute(req,res,url,token,session){
   req.on('end',async()=>{
     if(done)return;done=true;
     const live=()=>sessions.get(token)===session&&session.until>Date.now()&&isAdmin(session.user);
-    const redirect=loc=>{res.writeHead(303,{'Location':loc,'Cache-Control':'no-store'});res.end()};
+    const redirect=loc=>{if(session.remember)persistRememberedSessions();res.writeHead(303,{'Location':loc,'Cache-Control':'no-store'});res.end()};
     const fail=msg=>quickPage(req,res,session,msg,400);
-    const revoke=()=>{sessions.delete(token);res.writeHead(303,{'Location':'/login','Cache-Control':'no-store','Set-Cookie':'pro_session='+cookieOptions(req)+'; Max-Age=0'});res.end()};
-    const miss=msg=>{session.quickFailures=(session.quickFailures||0)+1;if(session.quickFailures>=3)revoke();else fail(msg+'，剩余 '+(3-session.quickFailures)+' 次。')};
+    const revoke=()=>{deleteSession(token);res.writeHead(303,{'Location':'/login','Cache-Control':'no-store','Set-Cookie':'pro_session='+cookieOptions(req)+'; Max-Age=0'});res.end()};
+    const miss=msg=>{session.quickFailures=(session.quickFailures||0)+1;if(session.quickFailures>=3)revoke();else{if(session.remember)persistRememberedSessions();fail(msg+'，剩余 '+(3-session.quickFailures)+' 次。')}};
     try{
       if(!live()){revoke();return}
       const p=new URLSearchParams(Buffer.concat(chunks).toString('utf8')),op=p.get('op'),pin=p.get('pin')||'';
@@ -938,13 +986,13 @@ function quickDeviceRoute(req,res,url,token,session){
 }
 
 function accessGate(req,res,url){
-  const now=Date.now();for(const [t,s] of sessions)if(s.until<=now)sessions.delete(t);
+  const now=Date.now();for(const [t,s] of sessions)if(s.until<=now)deleteSession(t);
   const token=sessionToken(req),user=currentUser(req),quickSession=token&&sessions.get(token);
   if(url.pathname==='/device-lock'){quickDeviceRoute(req,res,url,token,quickSession);return false}
   if(req.method==='GET'&&url.pathname==='/api/pro2/health'&&!user){reply(res,200,{ok:true});return false}
   if(req.method==='POST'&&url.pathname==='/logout'){
     if(req.headers['sec-fetch-site']==='cross-site'){reply(res,403,{error:'无效请求'});return false}
-    if(token)sessions.delete(token);
+    if(token)deleteSession(token);
     res.writeHead(303,{'Location':'/','Cache-Control':'no-store','Set-Cookie':'pro_session='+cookieOptions(req)+'; Max-Age=0'});res.end();return false;
   }
   const register=url.pathname==='/register';
@@ -993,6 +1041,7 @@ function accessGate(req,res,url){
     });return false;
   }
   if(req.method==='GET'&&(url.pathname==='/register'||url.pathname==='/login')){
+    if(user&&!register){res.writeHead(303,{'Location':'/','Cache-Control':'no-store'});res.end();return false;}
     loginPage(res,'',200,register,rememberedAccount(req));return false;
   }
   if(quickSession?.quickLocked){
@@ -1155,7 +1204,7 @@ function accountRoute(req,res,url){
         if(!latest||latest.hash!==fresh.hash||currentUser(req)?.username!==user.username){fail(409,'账号状态已改变，请重新登录');return}
         latest.salt=salt;latest.hash=hash;replaceAccount(latest);
         profileFailures.delete(user.username);
-        for(const [token,sess] of sessions)if(sess.user?.username===user.username)sessions.delete(token);
+        for(const [token,sess] of sessions)if(sess.user?.username===user.username)deleteSession(token);
         reply(res,200,{ok:true,relogin:true});
       }catch(e){log('PROFILE_ERROR '+String(e.code||'internal'));if(!res.destroyed)fail(500,'账号设置保存失败')}
       finally{release()}
@@ -1339,7 +1388,7 @@ function moderateAccount(actor,target,minutes){
   const until=Math.max(Number.isSafeInteger(account.blockedUntil)?account.blockedUntil:0,minutes?now+minutes*60000:0);
   if(until>now){account.blockedUntil=until;replaceAccount(account)}
   let revoked=0;
-  for(const [token,sess] of sessions)if(sess.user?.username===target){sessions.delete(token);revoked++}
+  for(const [token,sess] of sessions)if(sess.user?.username===target){deleteSession(token);revoked++}
   log('ADMIN_MODERATION '+JSON.stringify({actor:actor.username,action:minutes?'kick_and_restrict':'kick',target,minutes,revoked,blockedUntil:until>now?until:0,at:now}));
   return {status:200,data:{ok:true,revoked,blockedUntil:until>now?until:0}};
 }
@@ -1921,6 +1970,7 @@ const server=http.createServer((req,res)=>{
     reply(res,200,data,MIME[path.extname(filepath)]||'application/octet-stream');
   });
 });
+restoreRememberedSessions();
 server.listen(PORT,'127.0.0.1',()=>{
   pro2.start();pro2Trades.start();connectBinanceWS();quantTimer=setInterval(()=>void sampleQuantHistory(),60000);quantTimer.unref?.();quantRatioTimer=setInterval(()=>void sampleQuantRatios(),3000);quantRatioTimer.unref?.();quantExtraTimer=setInterval(()=>void sampleQuantExtra(),3000);quantExtraTimer.unref?.();void sampleQuantHistory();void refreshPublicCatalog();catalogTimer=setInterval(refreshPublicCatalog,15000);catalogTimer.unref?.();alignedStudy.flush();shortStudy.flush();swingFollow.flush();horizonAudit.flush();trendReviewTimer=setInterval(sampleTrendReview,15000);trendReviewTimer.unref?.();void sampleTrendReview();shortBookTimer=setInterval(sampleStudyBook,5000);shortBookTimer.unref?.();signalLabTimer=setInterval(scanSignalLab,1000);signalLabTimer.unref?.();
   log(`合约实时数据Pro v9 本地运行: http://localhost:${PORT}`);
