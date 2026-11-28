@@ -38,12 +38,11 @@
     const v=s.verification||{};
     $('alignment').textContent=v.samples>=30?`${n(100*v.aligned/v.samples,1)}%`:'样本不足';
     $('sampleCount').textContent=v.samples||0;$('pendingCount').textContent=v.pending||0;
-    $('pinNum').textContent=store.pins.size;$('favNum').textContent=store.favorites.size;
+    $('favNum').textContent=store.favorites.size;
   }
   function activeRows(){const query=store.query;const list=(store.snap?.symbols||[]).filter(m=>{
     if(store.exchange!=='all'&&m.exchange!==store.exchange)return false;
     if(query&&!String(m.symbol+' '+m.displaySymbol).toLowerCase().includes(query))return false;
-    if(store.filter==='pinned')return store.pins.has(m.symbol);
     if(store.filter==='favorite')return store.favorites.has(m.symbol);
     if(store.filter==='multi')return m.multi;
     if(store.filter==='selected')return !!m.quant?.length;
@@ -76,10 +75,10 @@
     </article>`;
   }
   function renderMarkets(){const all=activeRows(),shown=all.slice(0,store.max);
-    $('resultsCount').textContent=all.length+' 个结果';const qn=$('quantNum');if(qn)qn.textContent=(store.snap?.symbols||[]).filter(m=>m.quant?.length).length;$('pinNum').textContent=store.pins.size;$('favNum').textContent=store.favorites.size;
+    $('resultsCount').textContent=all.length+' 个结果';const qn=$('quantNum');if(qn)qn.textContent=(store.snap?.symbols||[]).filter(m=>m.quant?.length).length;$('favNum').textContent=store.favorites.size;
     $('more').hidden=all.length<=store.max;$('more').textContent=`加载更多 · ${shown.length}/${all.length}`;
     $('markets').innerHTML=shown.length?shown.map(row).join(''):
-      `<div class="empty">${store.filter==='pinned'?'没有置顶合约，点击任一合约旁的◇即可置顶。':store.filter==='favorite'?'自选为空，请在全部合约旁点击☆。':store.filter==='selected'?'暂无符合条件的已结束量化观察；等待真实数据积累。':store.filter==='all'&&!store.snap?.symbols?.length?'正在加载真实合约目录…':'没有符合筛选条件的合约；这不表示一定不会涨跌。'}</div>`;
+      `<div class="empty">${store.filter==='favorite'?'自选为空，请在全部合约旁点击☆。':store.filter==='selected'?'暂无符合条件的已结束量化观察；等待真实数据积累。':store.filter==='all'&&!store.snap?.symbols?.length?'正在加载真实合约目录…':'没有符合筛选条件的合约；这不表示一定不会涨跌。'}</div>`;
   }
   function renderAlerts(){const alerts=store.snap?.alerts||[];
     $('alerts').innerHTML=alerts.length?alerts.slice(0,15).map(a=>`<div class="alert-item"><span class="tag ${cls(a.direction)}">${direction(a.direction)}</span><strong>${esc(a.displaySymbol||a.symbol)}</strong><span>${(a.names||[]).map(esc).join('、')}</span><small>1H 收盘 ${tm(a.closedAt)} · 观测 ${tm(a.observedAt)} · ${a.result?('下一根1H变动 '+n(a.result.change,2)+'%'):'下一根1H结果待检查'}</small></div>`).join(''):
